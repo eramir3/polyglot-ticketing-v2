@@ -4,7 +4,7 @@ package orders.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "polyglot-ticketing-v1/protogen/go/orders/v1;ordersv1";
+option go_package = "polyglot-ticketing-v2/protogen/go/orders/v1;ordersv1";
 
 service OrdersService {
   rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);

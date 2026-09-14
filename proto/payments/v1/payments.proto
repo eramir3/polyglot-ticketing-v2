@@ -4,7 +4,7 @@ package payments.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "polyglot-ticketing-v1/protogen/go/payments/v1;paymentsv1";
+option go_package = "polyglot-ticketing-v2/protogen/go/payments/v1;paymentsv1";
 
 service PaymentsService {
   rpc CreatePayment(CreatePaymentRequest) returns (CreatePaymentResponse);

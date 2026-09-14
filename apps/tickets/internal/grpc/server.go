@@ -1,0 +1,168 @@
+package grpc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"polyglot-ticketing-v2/apps/tickets/internal/errorcode"
+	"polyglot-ticketing-v2/apps/tickets/internal/ticket"
+	commonv1 "polyglot-ticketing-v2/protogen/go/common/v1"
+	ticketsv1 "polyglot-ticketing-v2/protogen/go/tickets/v1"
+)
+
+type Server struct {
+	ticketsv1.UnimplementedTicketsServiceServer
+	service *ticket.Service
+	logger  *slog.Logger
+}
+
+func NewServer(service *ticket.Service, logger *slog.Logger) *Server {
+	return &Server{service: service, logger: logger}
+}
+
+func (server *Server) CreateTicket(
+	ctx context.Context,
+	request *ticketsv1.CreateTicketRequest,
+) (*ticketsv1.CreateTicketResponse, error) {
+	created, validationErrors, err := server.service.CreateTicket(ctx, ticket.CreateInput{
+		Title:  request.GetTitle(),
+		Price:  request.GetPrice(),
+		UserID: request.GetUserId(),
+	})
+	if len(validationErrors) > 0 {
+		return nil, structuredError(codes.InvalidArgument, validationErrors)
+	}
+	if err != nil {
+		server.logger.Error("ticket creation failed", "operation", "create_ticket", "error", err)
+		return nil, structuredError(codes.Internal, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),
+			Message: "Unable to create ticket.",
+		}})
+	}
+
+	return toCreateTicketResponse(created), nil
+}
+
+func (server *Server) UpdateTicket(
+	ctx context.Context,
+	request *ticketsv1.UpdateTicketRequest,
+) (*ticketsv1.UpdateTicketResponse, error) {
+	updated, validationErrors, err := server.service.UpdateTicket(ctx, request.GetId(), ticket.UpdateInput{
+		Title:  request.GetTitle(),
+		Price:  request.GetPrice(),
+		UserID: request.GetUserId(),
+	})
+	if len(validationErrors) > 0 {
+		return nil, structuredError(codes.InvalidArgument, validationErrors)
+	}
+	if errors.Is(err, ticket.ErrForbidden) {
+		return nil, structuredError(codes.PermissionDenied, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_FORBIDDEN),
+			Message: "You do not have permission to update this ticket.",
+		}})
+	}
+	if errors.Is(err, ticket.ErrReserved) {
+		return nil, structuredError(codes.PermissionDenied, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_FORBIDDEN),
+			Message: "Reserved tickets cannot be updated.",
+		}})
+	}
+	if errors.Is(err, ticket.ErrNotFound) {
+		return nil, structuredError(codes.NotFound, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
+			Message: "Ticket not found.",
+		}})
+	}
+	if err != nil {
+		server.logger.Error(
+			"ticket update failed",
+			"operation", "update_ticket",
+			"ticket_id", request.GetId(),
+			"error", err,
+		)
+		return nil, structuredError(codes.Internal, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),
+			Message: "Unable to update ticket.",
+		}})
+	}
+
+	return &ticketsv1.UpdateTicketResponse{Ticket: toTicketResponse(updated)}, nil
+}
+
+func (server *Server) ListTickets(
+	ctx context.Context,
+	_request *ticketsv1.ListTicketsRequest,
+) (*ticketsv1.ListTicketsResponse, error) {
+	listed, err := server.service.ListTickets(ctx)
+	if err != nil {
+		return nil, structuredError(codes.Internal, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),
+			Message: "Unable to retrieve tickets.",
+		}})
+	}
+
+	response := &ticketsv1.ListTicketsResponse{
+		Tickets: make([]*ticketsv1.Ticket, 0, len(listed)),
+	}
+	for _, listedTicket := range listed {
+		response.Tickets = append(response.Tickets, toTicketResponse(listedTicket))
+	}
+
+	return response, nil
+}
+
+func (server *Server) GetTicket(
+	ctx context.Context,
+	request *ticketsv1.GetTicketRequest,
+) (*ticketsv1.GetTicketResponse, error) {
+	found, err := server.service.GetTicket(ctx, request.GetId())
+	if errors.Is(err, ticket.ErrNotFound) {
+		return nil, structuredError(codes.NotFound, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
+			Message: "Ticket not found.",
+		}})
+	}
+	if err != nil {
+		return nil, structuredError(codes.Internal, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),
+			Message: "Unable to retrieve ticket.",
+		}})
+	}
+
+	return &ticketsv1.GetTicketResponse{Ticket: toTicketResponse(found)}, nil
+}
+
+func toCreateTicketResponse(ticket ticket.Ticket) *ticketsv1.CreateTicketResponse {
+	return &ticketsv1.CreateTicketResponse{
+		Id:     ticket.ID,
+		Price:  ticket.Price,
+		Title:  ticket.Title,
+		UserId: ticket.UserID,
+	}
+}
+
+func toTicketResponse(ticket ticket.Ticket) *ticketsv1.Ticket {
+	return &ticketsv1.Ticket{
+		Id:     ticket.ID,
+		Price:  ticket.Price,
+		Title:  ticket.Title,
+		UserId: ticket.UserID,
+	}
+}
+
+func structuredError(code codes.Code, errors []ticket.ValidationError) error {
+	payload := struct {
+		Errors []ticket.ValidationError `json:"errors"`
+	}{Errors: errors}
+	details, err := json.Marshal(payload)
+	if err != nil {
+		return status.Error(codes.Internal, `{"errors":[{"code":"`+errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR)+`","message":"An unexpected error occurred."}]}`)
+	}
+
+	return status.Error(code, string(details))
+}

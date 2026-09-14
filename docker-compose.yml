@@ -86,6 +86,54 @@ services:
     expose:
       - '1025'
 
+  tickets:
+    build:
+      context: .
+      dockerfile: apps/tickets/Dockerfile.dev
+    image: tickets:dev
+    container_name: tickets
+    environment:
+      DATABASE_URL: postgresql://tickets:${TICKETS_DB_PASSWORD:?TICKETS_DB_PASSWORD must be set}@tickets-db:5432/tickets-db?sslmode=disable
+      GRPC_PORT: 50052
+    depends_on:
+      tickets-db:
+        condition: service_healthy
+      tickets-migrate:
+        condition: service_completed_successfully
+    expose:
+      - '50052'
+      - '9090'
+  tickets-migrate:
+    build:
+      context: .
+      dockerfile: apps/tickets/Dockerfile.dev
+    image: tickets-migrate:dev
+    container_name: tickets-migrate
+    command: ['tickets-migrate']
+    environment:
+      DATABASE_URL: postgresql://tickets:${TICKETS_DB_PASSWORD:?TICKETS_DB_PASSWORD must be set}@tickets-db:5432/tickets-db?sslmode=disable
+    depends_on:
+      tickets-db:
+        condition: service_healthy
+    restart: 'no'
+
+  tickets-db:
+    image: postgres:17-alpine
+    container_name: tickets-db
+    environment:
+      POSTGRES_DB: tickets-db
+      POSTGRES_PASSWORD: ${TICKETS_DB_PASSWORD:?TICKETS_DB_PASSWORD must be set}
+      POSTGRES_USER: tickets
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tickets -d tickets-db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - '5433:5432'
+    volumes:
+      - tickets-db-data:/var/lib/postgresql/data
+
 volumes:
   identity-db-data:
 
