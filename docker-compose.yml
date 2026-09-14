@@ -9,6 +9,7 @@ services:
       NODE_ENV: development
       PORT: 3000
       IDENTITY_GRPC_URL: identity:50051
+      TICKETS_GRPC_URL: tickets:50052
       TICKETING_USER_APP_ORIGIN: ${TICKETING_USER_APP_ORIGIN:-http://localhost:3001}
     ports:
       - '3000:3000'
@@ -16,6 +17,7 @@ services:
       - '9090'
     depends_on:
       - identity
+      - tickets
 
   identity:
     build:

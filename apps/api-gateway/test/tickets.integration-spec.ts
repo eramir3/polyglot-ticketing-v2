@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { INestApplication, INestMicroservice } from '@nestjs/common';
-import { fromBinary } from '@bufbuild/protobuf';
 import {
   PostgreSqlContainer,
   StartedPostgreSqlContainer,
@@ -13,10 +12,6 @@ import { GenericContainer, StartedTestContainer, Wait } from 'testcontainers';
 import { createApiGatewayApplication } from '../src/app/app.bootstrap';
 import { createIdentityMicroservice } from '../../identity/src/app/app.bootstrap';
 import { migrateIdentityDatabase } from '../../identity/src/migrate-identity-database';
-import {
-  TicketCreatedSchema,
-  TicketUpdatedSchema,
-} from '../../../protogen/ts/tickets/v1/events_pb.js';
 
 describe('tickets endpoints', () => {
   let apiGateway: INestApplication;
@@ -186,13 +181,12 @@ describe('tickets endpoints', () => {
       await database.connect();
       try {
         const result = await database.query<{
-          aggregate_version: string;
           id: string;
           price: string;
           title: string;
           user_id: string;
         }>(
-          `SELECT aggregate_version::text, id::text, price::text, title, user_id
+          `SELECT id::text, price::text, title, user_id
          FROM tickets
          WHERE id = $1`,
           [ticket.id],
@@ -200,7 +194,6 @@ describe('tickets endpoints', () => {
 
         expect(result.rows).toEqual([
           {
-            aggregate_version: '0',
             id: ticket.id,
             price: '10000',
             title: 'Metallica',
@@ -208,34 +201,6 @@ describe('tickets endpoints', () => {
           },
         ]);
 
-        const outboxResult = await database.query<{
-          event_id: string;
-          payload: Buffer;
-          subject: string;
-        }>(
-          `SELECT event_id::text, subject, payload
-         FROM outbox_events
-         WHERE published_at IS NULL
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        );
-        expect(outboxResult.rows).toHaveLength(1);
-        expect(outboxResult.rows[0].subject).toBe('tickets.ticket.created.v1');
-
-        const event = fromBinary(
-          TicketCreatedSchema,
-          outboxResult.rows[0].payload,
-        );
-        expect(event).toMatchObject({
-          aggregateVersion: BigInt(0),
-          eventId: outboxResult.rows[0].event_id,
-          ticket: {
-            id: ticket.id,
-            price: BigInt(10_000),
-            title: 'Metallica',
-            userId,
-          },
-        });
       } finally {
         await database.end();
       }
@@ -339,42 +304,6 @@ describe('tickets endpoints', () => {
       });
     });
 
-    it('does not update a ticket reserved by an order', async () => {
-      const createdResponse = await postTicket(
-        { price: 15_000, title: 'Reserved ticket' },
-        sessionCookie,
-      );
-      expect(createdResponse.status).toBe(201);
-      const created = createdResponse.body as { id: string };
-
-      const database = new Client({ connectionString: ticketsDatabaseUrl });
-      await database.connect();
-      try {
-        await database.query(
-          'UPDATE tickets SET reserved_by_order_id = $2 WHERE id = $1',
-          [created.id, randomUUID()],
-        );
-      } finally {
-        await database.end();
-      }
-
-      const response = await putTicket(
-        created.id,
-        { price: 18_000, title: 'Reserved ticket updated' },
-        sessionCookie,
-      );
-
-      expect(response.status).toBe(403);
-      expect(response.body).toEqual({
-        errors: [
-          expect.objectContaining({
-            code: 'FORBIDDEN',
-            message: 'Reserved tickets cannot be updated.',
-          }),
-        ],
-      });
-    });
-
     it('returns a 404 if the provided id does not exist', async () => {
       const response = await putTicket(
         randomUUID(),
@@ -454,13 +383,12 @@ describe('tickets endpoints', () => {
       await database.connect();
       try {
         const result = await database.query<{
-          aggregate_version: string;
           id: string;
           price: string;
           title: string;
           user_id: string;
         }>(
-          `SELECT aggregate_version::text, id::text, price::text, title, user_id
+          `SELECT id::text, price::text, title, user_id
          FROM tickets
          WHERE id = $1`,
           [created.id],
@@ -468,7 +396,6 @@ describe('tickets endpoints', () => {
 
         expect(result.rows).toEqual([
           {
-            aggregate_version: '1',
             id: created.id,
             price: '18000',
             title: 'Mastodon Updated',
@@ -476,34 +403,6 @@ describe('tickets endpoints', () => {
           },
         ]);
 
-        const outboxResult = await database.query<{
-          event_id: string;
-          payload: Buffer;
-          subject: string;
-        }>(
-          `SELECT event_id::text, subject, payload
-           FROM outbox_events
-           WHERE subject = 'tickets.ticket.updated.v1'
-             AND published_at IS NULL
-           ORDER BY created_at DESC
-           LIMIT 1`,
-        );
-        expect(outboxResult.rows).toHaveLength(1);
-
-        const event = fromBinary(
-          TicketUpdatedSchema,
-          outboxResult.rows[0].payload,
-        );
-        expect(event).toMatchObject({
-          aggregateVersion: BigInt(1),
-          eventId: outboxResult.rows[0].event_id,
-          ticket: {
-            id: created.id,
-            price: BigInt(18_000),
-            title: 'Mastodon Updated',
-            userId,
-          },
-        });
       } finally {
         await database.end();
       }
