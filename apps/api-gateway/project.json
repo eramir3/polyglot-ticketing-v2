@@ -1,0 +1,102 @@
+{
+  "name": "api-gateway",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/api-gateway/src",
+  "projectType": "application",
+  "targets": {
+    "generate-proto": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/protogen/ts", "{workspaceRoot}/proto-deps"],
+      "options": {
+        "command": "pnpm proto:generate"
+      }
+    },
+    "build": {
+      "executor": "@nx/js:tsc",
+      "dependsOn": ["generate-proto"],
+      "options": {
+        "main": "apps/api-gateway/src/main.ts",
+        "outputPath": "dist/apps/api-gateway",
+        "rootDir": ".",
+        "tsConfig": "apps/api-gateway/tsconfig.app.json",
+        "assets": [
+          {
+            "glob": "**/*",
+            "input": "apps/api-gateway/src/assets",
+            "output": "assets"
+          }
+        ],
+        "generatePackageJson": true
+      },
+      "configurations": {
+        "development": {
+          "watch": false
+        }
+      }
+    },
+    "prune-lockfile": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": true,
+      "executor": "@nx/js:prune-lockfile",
+      "outputs": [
+        "{workspaceRoot}/dist/apps/api-gateway/package.json",
+        "{workspaceRoot}/dist/apps/api-gateway/pnpm-lock.yaml"
+      ],
+      "options": {
+        "buildTarget": "build"
+      }
+    },
+    "copy-workspace-modules": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": true,
+      "outputs": [
+        "{workspaceRoot}/dist/apps/api-gateway/workspace_modules"
+      ],
+      "executor": "@nx/js:copy-workspace-modules",
+      "options": {
+        "buildTarget": "build"
+      }
+    },
+    "prune": {
+      "dependsOn": [
+        "prune-lockfile",
+        "copy-workspace-modules"
+      ],
+      "executor": "nx:noop"
+    },
+    "serve": {
+      "continuous": true,
+      "executor": "@nx/js:node",
+      "defaultConfiguration": "development",
+      "dependsOn": [
+        "build"
+      ],
+      "options": {
+        "buildTarget": "api-gateway:build",
+        "runBuildTargetDependencies": false
+      },
+      "configurations": {
+        "development": {
+          "buildTarget": "api-gateway:build:development"
+        },
+        "production": {
+          "buildTarget": "api-gateway:build:production"
+        }
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["generate-proto"],
+      "cache": false,
+      "options": {
+        "command": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config apps/api-gateway/jest.integration.config.js --runInBand"
+      }
+    }
+  },
+  "tags": []
+}

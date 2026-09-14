@@ -1,0 +1,90 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile.dev
+    image: api-gateway:dev
+    container_name: api-gateway
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      IDENTITY_GRPC_URL: identity:50051
+    ports:
+      - '3000:3000'
+    expose:
+      - '9090'
+    depends_on:
+      - identity
+
+  identity:
+    build:
+      context: .
+      dockerfile: apps/identity/Dockerfile.dev
+    image: identity:dev
+    container_name: identity
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL must be set}
+      DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD must be set}@identity-db:5432/identity-db
+      EMAIL_VERIFICATION_URL: ${EMAIL_VERIFICATION_URL:-http://localhost:3000/api/auth/verify-email}
+      NODE_ENV: development
+      GRPC_PORT: 50051
+      SMTP_FROM: ${SMTP_FROM:-no-reply@polyglot-ticketing.local}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      TICKETING_USER_APP_ORIGIN: ${TICKETING_USER_APP_ORIGIN:-http://localhost:3001}
+    depends_on:
+      identity-db:
+        condition: service_healthy
+      identity-migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    expose:
+      - '50051'
+      - '9090'
+
+  identity-migrate:
+    image: identity:dev
+    container_name: identity-migrate
+    command: ['node', 'dist/apps/identity/apps/identity/src/migrate.js']
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL must be set}
+      DATABASE_URL: postgresql://identity:${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD must be set}@identity-db:5432/identity-db
+      SMTP_FROM: ${SMTP_FROM:-no-reply@polyglot-ticketing.local}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+    depends_on:
+      identity-db:
+        condition: service_healthy
+    restart: 'no'
+
+  identity-db:
+    image: postgres:17-alpine
+    container_name: identity-db
+    environment:
+      POSTGRES_DB: identity-db
+      POSTGRES_PASSWORD: ${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD must be set}
+      POSTGRES_USER: identity
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U identity -d identity-db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - '5432:5432'
+    volumes:
+      - identity-db-data:/var/lib/postgresql/data
+
+  mailpit:
+    image: axllent/mailpit:v1.28
+    container_name: mailpit
+    ports:
+      - '8025:8025'
+    expose:
+      - '1025'
+
+volumes:
+  identity-db-data:
+

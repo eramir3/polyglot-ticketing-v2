@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package orders.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "polyglot-ticketing-v1/protogen/go/orders/v1;ordersv1";
+
+service OrdersService {
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
+}
+
+message CreateOrderRequest {
+  string ticket_id = 1;
+  string user_id = 2;
+}
+
+message CreateOrderResponse {
+  string id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  string user_id = 3;
+  string ticket_id = 4;
+  OrderStatus status = 5;
+  bool created = 6;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+  string user_id = 2;
+}
+
+message CancelOrderResponse {
+  Order order = 1;
+}
+
+message GetOrderRequest {
+  string order_id = 1;
+  string user_id = 2;
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+message ListOrdersRequest {
+  string user_id = 1;
+}
+
+message ListOrdersResponse {
+  repeated Order orders = 1;
+}
+
+message Order {
+  string id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  string user_id = 3;
+  string ticket_id = 4;
+  OrderStatus status = 5;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_CREATED = 1;
+  ORDER_STATUS_CANCELED = 2;
+  ORDER_STATUS_AWAITING_PAYMENT = 3;
+  ORDER_STATUS_COMPLETE = 4;
+}
