@@ -28,6 +28,7 @@
       "executor": "nx:run-commands",
       "dependsOn": ["generate-proto"],
       "options": {
+        "command": "go test ./...",
         "cwd": "apps/tickets"
       }
     },

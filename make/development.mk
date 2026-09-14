@@ -6,7 +6,7 @@ install: ## Install workspace dependencies.
 generate-proto: ## Generate TypeScript and Go protobuf bindings.
 	pnpm proto:generate
 
-build: build-api-gateway build-identity ## Build every service.
+build: build-api-gateway build-identity build-tickets ## Build every service.
 
 build-api-gateway: ## Build the API gateway.
 	pnpm nx build api-gateway
