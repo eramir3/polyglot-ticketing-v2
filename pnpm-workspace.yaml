@@ -1,4 +1,12 @@
+packages:
+  - packages/*
+
 allowBuilds:
-  '@bufbuild/buf': set this to true or false
-  '@swc/core': set this to true or false
-  nx: set this to true or false
+  '@bufbuild/buf': true
+  '@parcel/watcher': false
+  '@swc/core': true
+  cpu-features: false
+  nx: true
+  protobufjs: false
+  ssh2: false
+  unrs-resolver: false

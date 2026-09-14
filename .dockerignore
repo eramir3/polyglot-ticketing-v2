@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+node_modules
+.pnpm-store
+.nx
+dist
+coverage
+protogen
+proto-deps

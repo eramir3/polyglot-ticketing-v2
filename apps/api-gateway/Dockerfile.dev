@@ -9,7 +9,7 @@ COPY apps/api-gateway ./apps/api-gateway
 COPY proto ./proto
 
 RUN pnpm install --frozen-lockfile
-RUN pnpm nx build api-gateway
+RUN NX_DAEMON=false pnpm nx build api-gateway
 
 ENV NODE_ENV=development
 ENV PORT=3000

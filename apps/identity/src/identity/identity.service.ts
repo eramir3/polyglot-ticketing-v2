@@ -1,7 +1,7 @@
 import { Metadata, status } from '@grpc/grpc-js';
 import { Inject, Injectable } from '@nestjs/common';
 import { IDENTITY_AUTH_CONTEXT } from '../auth/auth.constants';
-import { IdentityAuthContext } from '../auth/auth.factory';
+import type { IdentityAuthContext } from '../auth/auth.factory';
 import { StructuredGrpcError } from '../errors/grpc-error';
 import {
   CurrentUserRequest,

@@ -9,7 +9,7 @@ COPY apps/identity ./apps/identity
 COPY proto ./proto
 
 RUN pnpm install --frozen-lockfile
-RUN pnpm nx build identity
+RUN NX_DAEMON=false pnpm nx build identity
 
 ENV NODE_ENV=development
 ENV GRPC_PORT=50051

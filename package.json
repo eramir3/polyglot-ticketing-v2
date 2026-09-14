@@ -1,6 +1,7 @@
 {
   "name": "@polyglot-ticketing-v2/source",
   "version": "0.0.0",
+  "packageManager": "pnpm@11.15.1",
   "license": "MIT",
   "scripts": {
     "proto:generate": "buf export buf.build/bufbuild/protovalidate --path buf/validate/validate.proto --output proto-deps && buf generate"
@@ -25,7 +26,7 @@
     "jest": "30.4.2",
     "nx": "23.2.0",
     "prettier": "^3.8.1",
-    "ts-jest": "29.4.5",
+    "ts-jest": "^29.4.12",
     "testcontainers": "11.11.0",
     "tslib": "^2.3.0",
     "typescript": "~6.0.3"
@@ -47,8 +48,5 @@
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0"
-  },
-  "workspaces": [
-    "packages/*"
-  ]
+  }
 }

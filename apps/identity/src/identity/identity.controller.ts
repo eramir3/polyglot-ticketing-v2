@@ -2,7 +2,7 @@ import { Metadata } from '@grpc/grpc-js';
 import { Controller } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
 import { IdentityService } from './identity.service';
-import {
+import type {
   CurrentUserRequest,
   CurrentUserResponse,
   SignInRequest,
