@@ -9,6 +9,7 @@ services:
       NODE_ENV: development
       PORT: 3000
       IDENTITY_GRPC_URL: identity:50051
+      TICKETING_USER_APP_ORIGIN: ${TICKETING_USER_APP_ORIGIN:-http://localhost:3001}
     ports:
       - '3000:3000'
     expose:
