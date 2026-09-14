@@ -1,0 +1,90 @@
+package order
+
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+var (
+	ErrInvalidTicketEvent     = errors.New("invalid ticket event")
+	ErrInvalidExpirationEvent = errors.New("invalid expiration event")
+	ErrInvalidPaymentEvent    = errors.New("invalid payment event")
+	ErrNotFound               = errors.New("ticket not found")
+	ErrOrderNotCancelable     = errors.New("order cannot be canceled")
+	ErrOrderNotFound          = errors.New("order not found")
+	ErrReserved               = errors.New("ticket is reserved")
+	ErrTicketEventVersionGap  = errors.New("ticket event version gap")
+	ErrUnsupportedSubject     = errors.New("unsupported ticket event subject")
+)
+
+const ExpirationWindow = 15 * time.Minute
+
+type Status string
+
+const (
+	StatusCreated         Status = "Created"
+	StatusCanceled        Status = "Canceled"
+	StatusAwaitingPayment Status = "AwaitingPayment"
+	StatusComplete        Status = "Complete"
+)
+
+type Ticket struct {
+	AggregateVersion int64
+	ID               string
+	Title            string
+	Price            int64
+}
+
+type Order struct {
+	AggregateVersion int64
+	ExpiresAt        time.Time
+	ID               string
+	Status           Status
+	TicketID         string
+	UserID           string
+}
+
+type TicketReservationInput struct {
+	ExpiresAt time.Time
+	TicketID  string
+	UserID    string
+}
+
+type ReservationResult struct {
+	Created bool
+	Order   Order
+}
+
+type ValidationError struct {
+	Code    string `json:"code"`
+	Field   string `json:"field,omitempty"`
+	Message string `json:"message"`
+}
+
+type OrderRepository interface {
+	CancelByIDAndUser(context.Context, string, string) (Order, error)
+	GetByIDAndUser(context.Context, string, string) (Order, error)
+	ReserveTicket(context.Context, TicketReservationInput) (ReservationResult, error)
+	ListByUser(context.Context, string) ([]Order, error)
+}
+
+type TicketProjectionRepository interface {
+	UpsertTicketFromEvent(context.Context, string, Ticket) error
+}
+
+// ExpirationEventRepository applies an expiration event exactly once.
+type ExpirationEventRepository interface {
+	ApplyExpirationComplete(context.Context, string, string) error
+}
+
+// PaymentEventRepository applies a PaymentCreated event exactly once.
+type PaymentEventRepository interface {
+	ApplyPaymentCreated(context.Context, string, string) error
+}
+
+// PaymentResultEventRepository applies payment result events exactly once.
+type PaymentResultEventRepository interface {
+	ApplyPaymentFailed(context.Context, string, string) error
+	ApplyPaymentSucceeded(context.Context, string, string) error
+}
