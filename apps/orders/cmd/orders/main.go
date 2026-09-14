@@ -9,28 +9,16 @@ import (
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
-	"polyglot-ticketing-v2/apps/orders/internal/consumer"
 	grpcserver "polyglot-ticketing-v2/apps/orders/internal/grpc"
 	"polyglot-ticketing-v2/apps/orders/internal/order"
-	"polyglot-ticketing-v2/internal/observability"
-	"polyglot-ticketing-v2/internal/outbox"
-	"polyglot-ticketing-v2/internal/tracing"
 	ordersv1 "polyglot-ticketing-v2/protogen/go/orders/v1"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	shutdownTracing, err := tracing.Install(ctx, "orders", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
-	if err != nil {
-		slog.Error("failed to initialize tracing", "error", err)
-		os.Exit(1)
-	}
-	defer shutdownTracing(context.Background())
-
 	pool, err := pgxpool.New(ctx, requiredEnvironmentVariable("DATABASE_URL"))
 	if err != nil {
 		slog.Error("failed to create orders database pool", "error", err)
@@ -39,46 +27,6 @@ func main() {
 	defer pool.Close()
 
 	repository := order.NewPostgresRepository(pool)
-	metrics, registry := observability.NewMetrics()
-	observability.StartMetricsServer(ctx, environmentVariable("METRICS_PORT", observability.DefaultMetricsPort), registry, slog.Default())
-	natsURL := environmentVariable("NATS_URL", "nats://localhost:4222")
-	go outbox.NewPublisher(
-		outbox.NewPostgresRepository(pool),
-		outbox.Config{StreamName: "ORDERS_EVENTS", Subjects: []string{"orders.>"}},
-		natsURL,
-		slog.Default(),
-		metrics,
-	).Run(ctx)
-	go consumer.NewTicketConsumer(
-		repository,
-		natsURL,
-		slog.Default(),
-		metrics,
-	).Run(ctx)
-	go consumer.NewExpirationCompleteConsumer(
-		repository,
-		natsURL,
-		slog.Default(),
-		metrics,
-	).Run(ctx)
-	go consumer.NewPaymentCreatedConsumer(
-		repository,
-		natsURL,
-		slog.Default(),
-		metrics,
-	).Run(ctx)
-	go consumer.NewPaymentSucceededConsumer(
-		repository,
-		natsURL,
-		slog.Default(),
-		metrics,
-	).Run(ctx)
-	go consumer.NewPaymentFailedConsumer(
-		repository,
-		natsURL,
-		slog.Default(),
-		metrics,
-	).Run(ctx)
 
 	listener, err := net.Listen("tcp", ":"+environmentVariable("GRPC_PORT", "50053"))
 	if err != nil {
@@ -86,7 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.UnaryInterceptor(metrics.UnaryServerInterceptor))
+	server := grpc.NewServer()
 	ordersv1.RegisterOrdersServiceServer(
 		server,
 		grpcserver.NewServer(order.NewService(repository), slog.Default()),

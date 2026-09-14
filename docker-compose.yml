@@ -144,18 +144,13 @@ services:
     environment:
       DATABASE_URL: postgresql://orders:${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD must be set}@orders-db:5432/orders-db?sslmode=disable
       GRPC_PORT: 50053
-      NATS_URL: nats://nats:4222
-      OTEL_EXPORTER_OTLP_ENDPOINT: alloy:4318
     depends_on:
-      nats:
-        condition: service_started
       orders-db:
         condition: service_healthy
       orders-migrate:
         condition: service_completed_successfully
     expose:
       - '50053'
-      - '9090'
 
   orders-migrate:
     build:
@@ -190,4 +185,5 @@ services:
 
 volumes:
   identity-db-data:
+  orders-db-data:
   tickets-db-data:
