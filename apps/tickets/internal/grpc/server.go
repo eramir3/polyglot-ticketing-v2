@@ -30,14 +30,18 @@ func (server *Server) CreateTicket(
 	request *ticketsv1.CreateTicketRequest,
 ) (*ticketsv1.CreateTicketResponse, error) {
 	created, validationErrors, err := server.service.CreateTicket(ctx, ticket.CreateInput{
-		Title:  request.GetTitle(),
-		Price:  request.GetPrice(),
-		UserID: request.GetUserId(),
+		Title:          request.GetTitle(),
+		Price:          request.GetPrice(),
+		UserID:         request.GetUserId(),
+		IdempotencyKey: request.IdempotencyKey,
 	})
 	if len(validationErrors) > 0 {
 		return nil, structuredError(codes.InvalidArgument, validationErrors)
 	}
 	if err != nil {
+		if errors.Is(err, ticket.ErrUnavailable) {
+			return nil, structuredError(codes.Unavailable, []ticket.ValidationError{{Code: "SERVICE_UNAVAILABLE", Message: ticket.ErrUnavailable.Error()}})
+		}
 		server.logger.Error("ticket creation failed", "operation", "create_ticket", "error", err)
 		return nil, structuredError(codes.Internal, []ticket.ValidationError{{
 			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),

@@ -37,7 +37,7 @@ func main() {
 	server := grpc.NewServer()
 	ordersv1.RegisterOrdersServiceServer(
 		server,
-		grpcserver.NewServer(order.NewService(repository), slog.Default()),
+		grpcserver.NewServer(order.NewService(repository), slog.Default(), repository),
 	)
 
 	go func() {

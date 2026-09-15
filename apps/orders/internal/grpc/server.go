@@ -18,12 +18,36 @@ import (
 
 type Server struct {
 	ordersv1.UnimplementedOrdersServiceServer
-	service *order.Service
-	logger  *slog.Logger
+	service    *order.Service
+	logger     *slog.Logger
+	projection TicketProjectionRepository
 }
 
-func NewServer(service *order.Service, logger *slog.Logger) *Server {
-	return &Server{service: service, logger: logger}
+type TicketProjectionRepository interface {
+	EnsureTicketProjection(context.Context, order.Ticket) error
+}
+
+func NewServer(service *order.Service, logger *slog.Logger, projection TicketProjectionRepository) *Server {
+	return &Server{service: service, logger: logger, projection: projection}
+}
+
+func (server *Server) EnsureTicketProjection(ctx context.Context, request *ordersv1.EnsureTicketProjectionRequest) (*ordersv1.EnsureTicketProjectionResponse, error) {
+	input := order.Ticket{ID: request.GetId(), Title: request.GetTitle(), Price: request.GetPrice()}
+	if !order.ValidateProjection(input) {
+		return nil, status.Error(codes.InvalidArgument, "Invalid ticket projection")
+	}
+	if server.projection == nil {
+		return nil, status.Error(codes.Unavailable, "Projection repository unavailable")
+	}
+	err := server.projection.EnsureTicketProjection(ctx, input)
+	if errors.Is(err, order.ErrProjectionConflict) {
+		return nil, status.Error(codes.AlreadyExists, err.Error())
+	}
+	if err != nil {
+		server.logger.Error("ticket projection failed", "ticket_id", input.ID, "error", err)
+		return nil, status.Error(codes.Unavailable, "Unable to persist ticket projection")
+	}
+	return &ordersv1.EnsureTicketProjectionResponse{}, nil
 }
 
 func (server *Server) CancelOrder(

@@ -7,11 +7,20 @@ import "google/protobuf/timestamp.proto";
 option go_package = "polyglot-ticketing-v2/protogen/go/orders/v1;ordersv1";
 
 service OrdersService {
+  rpc EnsureTicketProjection(EnsureTicketProjectionRequest) returns (EnsureTicketProjectionResponse);
   rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
   rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
   rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
   rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
 }
+
+message EnsureTicketProjectionRequest {
+  string id = 1;
+  string title = 2;
+  int64 price = 3;
+}
+
+message EnsureTicketProjectionResponse {}
 
 message CreateOrderRequest {
   string ticket_id = 1;

@@ -26,6 +26,7 @@ func TestCreateOrderLogsUnexpectedFailure(t *testing.T) {
 	server := NewServer(
 		order.NewService(failingOrderRepository{}),
 		slog.New(slog.NewTextHandler(&logs, nil)),
+		nil,
 	)
 
 	_, err := server.CreateOrder(context.Background(), &ordersv1.CreateOrderRequest{
@@ -41,6 +42,7 @@ func TestCancelOrderLogsUnexpectedFailure(t *testing.T) {
 	server := NewServer(
 		order.NewService(failingOrderRepository{}),
 		slog.New(slog.NewTextHandler(&logs, nil)),
+		nil,
 	)
 
 	_, err := server.CancelOrder(context.Background(), &ordersv1.CancelOrderRequest{

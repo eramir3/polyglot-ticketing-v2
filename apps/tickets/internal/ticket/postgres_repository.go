@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -17,21 +18,33 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (repository *PostgresRepository) Create(ctx context.Context, input CreateInput) (Ticket, error) {
+	if input.ID == "" {
+		input.ID = uuid.NewString()
+	}
 	var created Ticket
-	err := repository.pool.QueryRow(
+	_, err := repository.pool.Exec(
 		ctx,
-		`INSERT INTO tickets (title, price, user_id)
-		 VALUES ($1, $2, $3)
-		RETURNING id, title, price, user_id`,
+		`INSERT INTO tickets (id, title, price, user_id)
+		 VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+		input.ID,
 		input.Title,
 		input.Price,
 		input.UserID,
-	).Scan(&created.ID, &created.Title, &created.Price, &created.UserID)
+	)
 	if err != nil {
 		return Ticket{}, err
 	}
 
-	return created, nil
+	err = repository.pool.QueryRow(ctx, `SELECT user_id FROM tickets WHERE id = $1`, input.ID).Scan(&created.UserID)
+	if err != nil {
+		return Ticket{}, err
+	}
+	if created.UserID != input.UserID {
+		return Ticket{}, ErrConflict
+	}
+	// Return the immutable workflow input even if this activity is retried after
+	// a subsequent edit. Never overwrite the current row on a retry.
+	return Ticket{ID: input.ID, Title: input.Title, Price: input.Price, UserID: input.UserID}, nil
 }
 
 func (repository *PostgresRepository) FindByID(ctx context.Context, id string) (Ticket, error) {

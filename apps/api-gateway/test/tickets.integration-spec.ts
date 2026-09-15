@@ -18,6 +18,12 @@ describe('tickets endpoints', () => {
   let identity: INestMicroservice;
   let identityDatabase: StartedPostgreSqlContainer;
   let ticketsDatabase: StartedPostgreSqlContainer;
+  let ordersDatabase: StartedPostgreSqlContainer;
+  let temporal: StartedTestContainer;
+  let ordersProcess: ChildProcessWithoutNullStreams;
+  let ordersDatabaseUrl: string;
+  let ticketsGrpcPort: number;
+  let ordersGrpcPort: number;
   let mailpit: StartedTestContainer;
   let ticketsProcess: ChildProcessWithoutNullStreams;
   let gatewayUrl: string;
@@ -27,13 +33,17 @@ describe('tickets endpoints', () => {
   let userId: string;
 
   beforeAll(async () => {
-    const [gatewayPort, identityGrpcPort, ticketsGrpcPort] = await Promise.all([
-      getAvailablePort(),
-      getAvailablePort(),
-      getAvailablePort(),
-    ]);
+    const [gatewayPort, identityGrpcPort, ticketPort, orderPort] =
+      await Promise.all([
+        getAvailablePort(),
+        getAvailablePort(),
+        getAvailablePort(),
+        getAvailablePort(),
+      ]);
+    ticketsGrpcPort = ticketPort;
+    ordersGrpcPort = orderPort;
 
-    [identityDatabase, ticketsDatabase] = await Promise.all([
+    [identityDatabase, ticketsDatabase, ordersDatabase] = await Promise.all([
       new PostgreSqlContainer('postgres:17-alpine')
         .withDatabase('identity')
         .withUsername('identity')
@@ -44,7 +54,40 @@ describe('tickets endpoints', () => {
         .withUsername('tickets')
         .withPassword('tickets-test-password')
         .start(),
+      new PostgreSqlContainer('postgres:17-alpine')
+        .withDatabase('orders')
+        .withUsername('orders')
+        .withPassword('orders-test-password')
+        .start(),
     ]);
+    temporal = await new GenericContainer('temporalio/temporal:1.6.1')
+      .withCommand([
+        'server',
+        'start-dev',
+        '--ip',
+        '0.0.0.0',
+        '--db-filename',
+        '/tmp/temporal.db',
+        '--headless',
+      ])
+      .withExposedPorts(7233)
+      .withHealthCheck({
+        test: [
+          'CMD',
+          'temporal',
+          'operator',
+          'cluster',
+          'health',
+          '--address',
+          '127.0.0.1:7233',
+        ],
+        interval: 1_000,
+        timeout: 5_000,
+        retries: 60,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
+      .withStartupTimeout(120_000)
+      .start();
     mailpit = await new GenericContainer('axllent/mailpit:v1.28')
       .withExposedPorts(1025)
       .withWaitStrategy(Wait.forListeningPorts())
@@ -53,6 +96,7 @@ describe('tickets endpoints', () => {
     gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
     identityDatabaseUrl = identityDatabase.getConnectionUri();
     ticketsDatabaseUrl = ticketsDatabase.getConnectionUri();
+    ordersDatabaseUrl = ordersDatabase.getConnectionUri();
     Object.assign(process.env, {
       BETTER_AUTH_SECRET: 'integration-test-secret-at-least-32-characters',
       BETTER_AUTH_URL: gatewayUrl,
@@ -64,10 +108,42 @@ describe('tickets endpoints', () => {
       SMTP_PORT: mailpit.getMappedPort(1025).toString(),
       TICKETING_USER_APP_ORIGIN: 'http://localhost:3001',
       TICKETS_GRPC_URL: `127.0.0.1:${ticketsGrpcPort}`,
+      ORDERS_GRPC_URL: `127.0.0.1:${ordersGrpcPort}`,
+      TEMPORAL_ADDRESS: `${temporal.getHost()}:${temporal.getMappedPort(7233)}`,
+      TEMPORAL_NAMESPACE: 'default',
+      TEMPORAL_TASK_QUEUE: 'ticket-creation',
     });
 
     await migrateIdentityDatabase();
     await runTicketsMigration(withSslDisabled(ticketsDatabaseUrl));
+    await runGoCommand(
+      ['run', './cmd/migrate'],
+      { DATABASE_URL: withSslDisabled(ordersDatabaseUrl) },
+      join(process.cwd(), 'apps/orders'),
+    );
+    await runGoCommand(
+      [
+        'test',
+        './internal/ticket',
+        '-run',
+        'TestPostgresCreationRetry',
+        '-count=1',
+      ],
+      { TICKETS_TEST_DATABASE_URL: withSslDisabled(ticketsDatabaseUrl) },
+    );
+    await runGoCommand(
+      [
+        'test',
+        './internal/order',
+        '-run',
+        'TestPostgresProjectionRetry',
+        '-count=1',
+      ],
+      { ORDERS_TEST_DATABASE_URL: withSslDisabled(ordersDatabaseUrl) },
+      join(process.cwd(), 'apps/orders'),
+    );
+    ordersProcess = startOrdersService();
+    await waitForPort(ordersGrpcPort, ordersProcess);
 
     identity = await createIdentityMicroservice(identityGrpcPort);
     await identity.listen();
@@ -87,6 +163,9 @@ describe('tickets endpoints', () => {
     await apiGateway?.close();
     await identity?.close();
     await stopTicketsService(ticketsProcess);
+    await stopTicketsService(ordersProcess);
+    await temporal?.stop();
+    await ordersDatabase?.stop();
     await mailpit?.stop();
     await ticketsDatabase?.stop();
     await identityDatabase?.stop();
@@ -200,7 +279,6 @@ describe('tickets endpoints', () => {
             user_id: userId,
           },
         ]);
-
       } finally {
         await database.end();
       }
@@ -402,12 +480,181 @@ describe('tickets endpoints', () => {
             user_id: userId,
           },
         ]);
-
       } finally {
         await database.end();
       }
     });
   });
+
+  describe('durable ticket projection', () => {
+    it('projects the ticket before returning and permits an immediate order', async () => {
+      const response = await postTicket(
+        { title: 'Ready to order', price: 12345 },
+        sessionCookie,
+      );
+      expect(response.status).toBe(201);
+      const { id } = response.body as { id: string };
+      expect(
+        await queryRows(
+          ordersDatabaseUrl,
+          'SELECT id, title, price::text FROM tickets WHERE id = $1',
+          [id],
+        ),
+      ).toEqual([{ id, title: 'Ready to order', price: '12345' }]);
+      const reserved = await postJson(
+        '/api/orders',
+        { ticketId: id },
+        sessionCookie,
+      );
+      expect(reserved.status).toBe(201);
+      expect(reserved.body).toMatchObject({ ticketId: id, userId });
+    });
+
+    it('deduplicates concurrent requests and returns the original result after editing', async () => {
+      const key = randomUUID();
+      const body = { title: `Concurrent ${key}`, price: 100 };
+      const responses = await Promise.all([
+        postTicket(body, sessionCookie, key),
+        postTicket(body, sessionCookie, key),
+      ]);
+      expect(responses.map((r) => r.status)).toEqual([201, 201]);
+      expect(responses[0].body).toEqual(responses[1].body);
+      const { id } = responses[0].body as { id: string };
+      expect(
+        await queryRows(
+          ticketsDatabaseUrl,
+          'SELECT id FROM tickets WHERE title = $1',
+          [body.title],
+        ),
+      ).toEqual([{ id }]);
+      expect(
+        (await putTicket(id, { title: 'Edited', price: 200 }, sessionCookie))
+          .status,
+      ).toBe(200);
+      const retry = await postTicket(body, sessionCookie, key);
+      expect(retry.status).toBe(201);
+      expect(retry.body).toEqual(responses[0].body);
+      expect((await getJson(`/api/tickets/${id}`)).body).toMatchObject({
+        title: 'Edited',
+        price: 200,
+      });
+    });
+
+    it('replays the original result for a changed payload with the same key and isolates keys by user', async () => {
+      const key = randomUUID();
+      const body = { title: 'Key scope', price: 300 };
+      const first = await postTicket(body, sessionCookie, key);
+      expect(first.status).toBe(201);
+      const changed = await postTicket(
+        { ...body, price: 400 },
+        sessionCookie,
+        key,
+      );
+      expect(changed.status).toBe(201);
+      expect(changed.body).toEqual(first.body);
+      const other = await createAuthenticatedUser();
+      const second = await postTicket(body, other.sessionCookie, key);
+      expect(second.status).toBe(201);
+      expect((second.body as { id: string }).id).not.toBe(
+        (first.body as { id: string }).id,
+      );
+    });
+
+    it('rejects empty and oversized keys', async () => {
+      for (const key of ['', 'x'.repeat(129)]) {
+        const response = await postTicket(
+          { title: 'Invalid key', price: 100 },
+          sessionCookie,
+          key,
+        );
+        expect(response.status).toBe(400);
+      }
+    });
+
+    it('continues after an HTTP timeout and worker restart during an Orders outage', async () => {
+      await stopTicketsService(ordersProcess);
+      const key = randomUUID();
+      const body = { title: `Recovery ${key}`, price: 500 };
+      const timedOut = await postTicket(body, sessionCookie, key);
+      expect(timedOut.status).toBe(503);
+      const rows = await queryRows(
+        ticketsDatabaseUrl,
+        'SELECT id FROM tickets WHERE title = $1',
+        [body.title],
+      );
+      expect(rows).toHaveLength(1);
+      const id = rows[0].id;
+      expect(
+        await queryRows(
+          ordersDatabaseUrl,
+          'SELECT id FROM tickets WHERE id = $1',
+          [id],
+        ),
+      ).toEqual([]);
+
+      await stopTicketsService(ticketsProcess);
+      ordersProcess = startOrdersService();
+      await waitForPort(ordersGrpcPort, ordersProcess);
+      ticketsProcess = startTicketsService(
+        ticketsGrpcPort,
+        withSslDisabled(ticketsDatabaseUrl),
+      );
+      await waitForPort(ticketsGrpcPort, ticketsProcess);
+      // The existing gateway channel reconnects when the worker/service resumes.
+      const deadline = Date.now() + 60_000;
+      let recovered: HttpResponse;
+      do {
+        recovered = await postTicket(body, sessionCookie, key);
+        if (recovered.status === 201) break;
+        await delay(200);
+      } while (Date.now() < deadline);
+      expect(recovered.status).toBe(201);
+      expect(recovered.body).toMatchObject({ id });
+      expect(
+        await queryRows(
+          ordersDatabaseUrl,
+          'SELECT id FROM tickets WHERE id = $1',
+          [id],
+        ),
+      ).toEqual([{ id }]);
+      expect(
+        await queryRows(
+          ticketsDatabaseUrl,
+          'SELECT id FROM tickets WHERE title = $1',
+          [body.title],
+        ),
+      ).toEqual([{ id }]);
+    });
+  });
+
+  function startOrdersService(): ChildProcessWithoutNullStreams {
+    const child = spawn('go', ['run', './cmd/orders'], {
+      cwd: join(process.cwd(), 'apps/orders'),
+      detached: true,
+      env: {
+        ...process.env,
+        DATABASE_URL: withSslDisabled(ordersDatabaseUrl),
+        GRPC_PORT: ordersGrpcPort.toString(),
+      },
+      stdio: 'pipe',
+    });
+    collectProcessOutput(child);
+    return child;
+  }
+
+  async function queryRows(
+    databaseUrl: string,
+    sql: string,
+    values: unknown[],
+  ): Promise<Record<string, string>[]> {
+    const database = new Client({ connectionString: databaseUrl });
+    await database.connect();
+    try {
+      return (await database.query(sql, values)).rows;
+    } finally {
+      await database.end();
+    }
+  }
 
   async function createAuthenticatedUser(): Promise<{
     sessionCookie: string;
@@ -455,8 +702,9 @@ describe('tickets endpoints', () => {
   function postTicket(
     body: { title: string; price: number },
     cookie?: string,
+    idempotencyKey?: string,
   ): Promise<HttpResponse> {
-    return postJson('/api/tickets', body, cookie);
+    return postJson('/api/tickets', body, cookie, idempotencyKey);
   }
 
   function putTicket(
@@ -471,12 +719,16 @@ describe('tickets endpoints', () => {
     path: string,
     body: Record<string, string | number>,
     cookie?: string,
+    idempotencyKey?: string,
   ): Promise<HttpResponse> {
     const response = await fetch(`${gatewayUrl}${path}`, {
       body: JSON.stringify(body),
       headers: {
         'content-type': 'application/json',
         ...(cookie === undefined ? {} : { cookie }),
+        ...(idempotencyKey === undefined
+          ? {}
+          : { 'Idempotency-Key': idempotencyKey }),
       },
       method: 'POST',
     });
@@ -536,7 +788,7 @@ function startTicketsService(
   grpcPort: number,
   databaseUrl: string,
 ): ChildProcessWithoutNullStreams {
-  return spawn('go', ['run', './cmd/tickets'], {
+  const child = spawn('go', ['run', './cmd/tickets'], {
     cwd: ticketsDirectory(),
     detached: true,
     env: {
@@ -546,15 +798,18 @@ function startTicketsService(
     },
     stdio: 'pipe',
   });
+  collectProcessOutput(child);
+  return child;
 }
 
 /** Executes a Go command and includes its captured output if it fails. */
 async function runGoCommand(
   args: string[],
   environment: NodeJS.ProcessEnv,
+  cwd = ticketsDirectory(),
 ): Promise<void> {
   const command = spawn('go', args, {
-    cwd: ticketsDirectory(),
+    cwd,
     env: { ...process.env, ...environment },
     stdio: 'pipe',
   });
@@ -582,7 +837,7 @@ async function waitForPort(
   port: number,
   ticketsProcess: ChildProcessWithoutNullStreams,
 ): Promise<void> {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 90_000;
 
   while (Date.now() < deadline) {
     if (ticketsProcess.exitCode !== null) {
@@ -596,7 +851,7 @@ async function waitForPort(
     await delay(100);
   }
 
-  throw new Error('Tickets service did not start within 15 seconds.');
+  throw new Error('Go service did not start within 90 seconds.');
 }
 
 /** Reports whether a TCP connection can be established to the given local port. */
@@ -615,7 +870,11 @@ function canConnect(port: number): Promise<boolean> {
 async function stopTicketsService(
   ticketsProcess: ChildProcessWithoutNullStreams | undefined,
 ): Promise<void> {
-  if (!ticketsProcess || ticketsProcess.exitCode !== null) {
+  if (
+    !ticketsProcess ||
+    ticketsProcess.exitCode !== null ||
+    ticketsProcess.signalCode !== null
+  ) {
     return;
   }
 
@@ -624,10 +883,14 @@ async function stopTicketsService(
   });
   terminateProcessGroup(ticketsProcess, 'SIGTERM');
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const stopped = await Promise.race([
     exited.then(() => true),
-    delay(5_000).then(() => false),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), 5_000);
+    }),
   ]);
+  clearTimeout(timer);
   if (!stopped) {
     terminateProcessGroup(ticketsProcess, 'SIGKILL');
     await exited;

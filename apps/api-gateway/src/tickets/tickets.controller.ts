@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Put,
@@ -44,7 +45,8 @@ export class TicketsController {
   createTicket(
     @Body() dto: CreateTicketDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<CreateTicketResponse> {
-    return this.ticketsService.createTicket(dto, user.id);
+    return this.ticketsService.createTicket(dto, user.id, idempotencyKey);
   }
 }

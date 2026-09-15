@@ -9,10 +9,14 @@ import (
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.temporal.io/sdk/client"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
+	"polyglot-ticketing-v2/apps/tickets/internal/creation"
 	grpcserver "polyglot-ticketing-v2/apps/tickets/internal/grpc"
 	"polyglot-ticketing-v2/apps/tickets/internal/ticket"
+	ordersv1 "polyglot-ticketing-v2/protogen/go/orders/v1"
 	ticketsv1 "polyglot-ticketing-v2/protogen/go/tickets/v1"
 )
 
@@ -28,6 +32,34 @@ func main() {
 	defer pool.Close()
 
 	repository := ticket.NewPostgresRepository(pool)
+	temporalClient, err := client.Dial(client.Options{
+		HostPort:  environmentVariable("TEMPORAL_ADDRESS", "localhost:7233"),
+		Namespace: environmentVariable("TEMPORAL_NAMESPACE", "default"),
+	})
+	if err != nil {
+		slog.Error("failed to connect to Temporal", "error", err)
+		os.Exit(1)
+	}
+	defer temporalClient.Close()
+	ordersConnection, err := grpc.NewClient(environmentVariable("ORDERS_GRPC_URL", "localhost:50053"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		slog.Error("failed to create Orders client", "error", err)
+		os.Exit(1)
+	}
+	defer ordersConnection.Close()
+	taskQueue := environmentVariable("TEMPORAL_TASK_QUEUE", creation.DefaultTaskQueue)
+	temporalWorker := creation.NewWorker(
+		temporalClient,
+		taskQueue,
+		repository,
+		ordersv1.NewOrdersServiceClient(ordersConnection),
+	)
+	if err := temporalWorker.Start(); err != nil {
+		slog.Error("failed to start Temporal worker", "error", err)
+		os.Exit(1)
+	}
+	defer temporalWorker.Stop()
+	coordinator := &creation.Coordinator{Client: temporalClient, TaskQueue: taskQueue}
 
 	listener, err := net.Listen("tcp", ":"+environmentVariable("GRPC_PORT", "50052"))
 	if err != nil {
@@ -38,7 +70,7 @@ func main() {
 	server := grpc.NewServer()
 	ticketsv1.RegisterTicketsServiceServer(
 		server,
-		grpcserver.NewServer(ticket.NewService(repository), slog.Default()),
+		grpcserver.NewServer(ticket.NewServiceWithTicketCreationCoordinator(repository, coordinator), slog.Default()),
 	)
 
 	go func() {

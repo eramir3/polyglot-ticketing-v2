@@ -1,4 +1,54 @@
 services:
+  temporal:
+    image: temporalio/temporal:1.6.1
+    command:
+      [
+        'server',
+        'start-dev',
+        '--ip',
+        '0.0.0.0',
+        '--db-filename',
+        '/home/temporal/temporal.db',
+      ]
+    ports:
+      - '7233:7233'
+      - '8233:8233'
+    volumes:
+      - temporal-data:/home/temporal
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'temporal',
+          'operator',
+          'cluster',
+          'health',
+          '--address',
+          '127.0.0.1:7233',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  temporal-namespace:
+    image: temporalio/temporal:1.6.1
+    command:
+      [
+        'operator',
+        'namespace',
+        'update',
+        '--address',
+        'temporal:7233',
+        '--namespace',
+        'default',
+        '--retention',
+        '168h',
+      ]
+    depends_on:
+      temporal:
+        condition: service_healthy
+    restart: 'no'
+
   api-gateway:
     build:
       context: .
@@ -99,7 +149,15 @@ services:
     environment:
       DATABASE_URL: postgresql://tickets:${TICKETS_DB_PASSWORD:?TICKETS_DB_PASSWORD must be set}@tickets-db:5432/tickets-db?sslmode=disable
       GRPC_PORT: 50052
+      ORDERS_GRPC_URL: orders:50053
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: ticket-creation
     depends_on:
+      temporal-namespace:
+        condition: service_completed_successfully
+      orders:
+        condition: service_started
       tickets-db:
         condition: service_healthy
       tickets-migrate:
@@ -186,6 +244,7 @@ services:
       - orders-db-data:/var/lib/postgresql/data
 
 volumes:
+  temporal-data:
   identity-db-data:
   orders-db-data:
   tickets-db-data:

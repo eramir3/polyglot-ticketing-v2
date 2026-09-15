@@ -17,11 +17,25 @@ type ValidationError struct {
 }
 
 type Service struct {
-	repository Repository
+	repository  Repository
+	coordinator TicketCreationCoordinator
+}
+
+// TicketCreationCoordinator starts or joins the durable ticket creation
+// operation. The production implementation is backed by Temporal.
+type TicketCreationCoordinator interface {
+	Create(context.Context, CreateInput) (Ticket, error)
 }
 
 func NewService(repository Repository) *Service {
-	return &Service{repository: repository}
+	return NewServiceWithTicketCreationCoordinator(repository, repository)
+}
+
+func NewServiceWithTicketCreationCoordinator(repository Repository, coordinator TicketCreationCoordinator) *Service {
+	return &Service{
+		repository:  repository,
+		coordinator: coordinator,
+	}
 }
 
 func (service *Service) CreateTicket(ctx context.Context, input CreateInput) (Ticket, []ValidationError, error) {
@@ -29,7 +43,17 @@ func (service *Service) CreateTicket(ctx context.Context, input CreateInput) (Ti
 		return Ticket{}, validationErrors, nil
 	}
 
-	created, err := service.repository.Create(ctx, input)
+	if input.IdempotencyKey != nil {
+		key := *input.IdempotencyKey
+		valid := len(key) >= 1 && len(key) <= 128
+		for _, c := range key {
+			valid = valid && c >= 32 && c <= 126
+		}
+		if !valid {
+			return Ticket{}, []ValidationError{{Code: "INVALID_ARGUMENT", Field: "idempotencyKey", Message: "Idempotency-Key must contain 1 to 128 printable ASCII characters."}}, nil
+		}
+	}
+	created, err := service.coordinator.Create(ctx, input)
 	return created, nil, err
 }
 
