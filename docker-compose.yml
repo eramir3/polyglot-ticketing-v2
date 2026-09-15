@@ -73,7 +73,7 @@ services:
       POSTGRES_PASSWORD: ${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD must be set}
       POSTGRES_USER: identity
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U identity -d identity-db']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U identity -d identity-db']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -128,7 +128,7 @@ services:
       POSTGRES_PASSWORD: ${TICKETS_DB_PASSWORD:?TICKETS_DB_PASSWORD must be set}
       POSTGRES_USER: tickets
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U tickets -d tickets-db']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U tickets -d tickets-db']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -176,7 +176,7 @@ services:
       POSTGRES_PASSWORD: ${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD must be set}
       POSTGRES_USER: orders
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U orders -d orders-db']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U orders -d orders-db']
       interval: 5s
       timeout: 5s
       retries: 10
