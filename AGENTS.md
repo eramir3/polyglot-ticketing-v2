@@ -21,3 +21,56 @@
 - The `nx-generate` skill handles generator discovery internally - don't call nx_docs just to look up generator syntax
 
 <!-- nx configuration end-->
+
+# Project Guide
+
+## Architecture
+
+- This is an Nx monorepo. TypeScript/NestJS services are `api-gateway` and
+  `identity`; Go services are `tickets` and `orders`.
+- The API gateway is the only REST entry point (`/api/*`). Internal service
+  communication uses gRPC contracts in `proto/`.
+- `proto/` is the source of truth. Generate bindings with `pnpm proto:generate`
+  (or `make generate-proto`); do not hand-edit `protogen/go` or `protogen/ts`.
+- Each service owns its PostgreSQL database and migrations. Do not query or
+  write another service's database directly.
+- Tickets creation is a Temporal workflow: persist the Tickets record, then
+  ensure the Orders ticket projection through Orders gRPC. There are no events,
+  outbox patterns, or aggregate versions in the current design.
+
+## Working Conventions
+
+- Use `pnpm` (pinned in `package.json`) for JavaScript dependencies and Nx
+  commands. Use `pnpm nx ...`, not a global Nx binary.
+- Run workspace tasks through Make targets when available: `make test`,
+  `make test-tickets`, `make test-orders`, and `make test-api-gateway`.
+- Run `make docker-up` for the full local stack. It regenerates protobuf
+  bindings and starts PostgreSQL, Mailpit, Temporal, migrations, and services.
+  `make docker-reset` deliberately destroys Compose volumes.
+- Copy `.env.example` to `.env` for local Compose credentials. Never commit
+  secrets or `.env` files.
+- Add forward-only SQL migrations under the owning service's `migrations/`
+  directory. Do not edit a migration that may already have run.
+- Preserve a dirty worktree: treat unrelated changes as user work. Do not use
+  destructive Git commands unless explicitly requested.
+
+## Ticket Creation Rules
+
+- The backend generates ticket UUIDs. The frontend optionally supplies an
+  `Idempotency-Key` to identify one logical POST retry.
+- Keys are scoped to the authenticated user. A repeated key returns the first
+  workflow result even if the retry body differs; a request without a key is a
+  new creation.
+- Keep Temporal workflow code deterministic. I/O belongs in activities, and
+  activities must remain safe to retry by the stable ticket UUID.
+- The Tickets process hosts both the gRPC server and Temporal worker. Keep
+  Temporal components organized under `apps/tickets/internal/creation/`:
+  `coordinator.go`, `workflow.go`, `activities.go`, and `worker.go`.
+
+## Verification
+
+- Changes to `.proto` files require regenerated Go and TypeScript bindings and
+  affected service builds/tests.
+- Gateway integration tests use Docker/Testcontainers. Orders projection tests
+  also require Docker.
+- Run `git diff --check` before handing off changes.
