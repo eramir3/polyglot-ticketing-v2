@@ -18,20 +18,20 @@ type ValidationError struct {
 
 type Service struct {
 	repository  Repository
-	coordinator TicketCreationCoordinator
+	coordinator Coordinator
 }
 
-// TicketCreationCoordinator starts or joins the durable ticket creation
-// operation. The production implementation is backed by Temporal.
-type TicketCreationCoordinator interface {
+// Coordinator starts or joins the durable ticket creation and update
+// operations. The production implementation is backed by Temporal.
+type Coordinator interface {
 	Create(context.Context, CreateInput) (Ticket, error)
+	Update(context.Context, string, UpdateInput) (Ticket, error)
 }
 
-func NewService(repository Repository) *Service {
-	return NewServiceWithTicketCreationCoordinator(repository, repository)
-}
-
-func NewServiceWithTicketCreationCoordinator(repository Repository, coordinator TicketCreationCoordinator) *Service {
+func NewService(
+	repository Repository,
+	coordinator Coordinator,
+) *Service {
 	return &Service{
 		repository:  repository,
 		coordinator: coordinator,
@@ -44,13 +44,8 @@ func (service *Service) CreateTicket(ctx context.Context, input CreateInput) (Ti
 	}
 
 	if input.IdempotencyKey != nil {
-		key := *input.IdempotencyKey
-		valid := len(key) >= 1 && len(key) <= 128
-		for _, c := range key {
-			valid = valid && c >= 32 && c <= 126
-		}
-		if !valid {
-			return Ticket{}, []ValidationError{{Code: "INVALID_ARGUMENT", Field: "idempotencyKey", Message: "Idempotency-Key must contain 1 to 128 printable ASCII characters."}}, nil
+		if validationErrors := validateIdempotencyKey(*input.IdempotencyKey, false); len(validationErrors) > 0 {
+			return Ticket{}, validationErrors, nil
 		}
 	}
 	created, err := service.coordinator.Create(ctx, input)
@@ -69,16 +64,28 @@ func (service *Service) UpdateTicket(ctx context.Context, id string, input Updat
 	if validationErrors := validateMutation(input.Title, input.Price, input.UserID); len(validationErrors) > 0 {
 		return Ticket{}, validationErrors, nil
 	}
-
-	found, err := service.repository.FindByID(ctx, id)
-	if err != nil {
-		return Ticket{}, nil, err
+	if validationErrors := validateIdempotencyKey(input.IdempotencyKey, true); len(validationErrors) > 0 {
+		return Ticket{}, validationErrors, nil
 	}
-	if found.UserID != input.UserID {
-		return Ticket{}, nil, ErrForbidden
-	}
-	updated, err := service.repository.Update(ctx, id, input)
+	updated, err := service.coordinator.Update(ctx, id, input)
 	return updated, nil, err
+}
+
+func validateIdempotencyKey(key string, required bool) []ValidationError {
+	if key == "" && required {
+		return []ValidationError{{Code: "INVALID_ARGUMENT", Field: "idempotencyKey", Message: "Idempotency-Key is required."}}
+	}
+	if key == "" {
+		return nil
+	}
+	valid := len(key) <= 128
+	for _, c := range key {
+		valid = valid && c >= 32 && c <= 126
+	}
+	if valid {
+		return nil
+	}
+	return []ValidationError{{Code: "INVALID_ARGUMENT", Field: "idempotencyKey", Message: "Idempotency-Key must contain 1 to 128 printable ASCII characters."}}
 }
 
 func validateMutation(title string, price int64, userID string) []ValidationError {

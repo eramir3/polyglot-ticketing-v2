@@ -7,7 +7,7 @@ import (
 )
 
 func TestServiceCreateRejectsInvalidInput(t *testing.T) {
-	service := NewService(fakeRepository{})
+	service := newTestService(fakeRepository{})
 
 	testCases := []struct {
 		name  string
@@ -53,7 +53,7 @@ func TestServiceCreateRejectsInvalidInput(t *testing.T) {
 }
 
 func TestServiceCreateAcceptsMaximumSafePrice(t *testing.T) {
-	service := NewService(fakeRepository{})
+	service := newTestService(fakeRepository{})
 
 	created, validationErrors, err := service.CreateTicket(context.Background(), CreateInput{
 		Title:  "Concert ticket",
@@ -73,7 +73,7 @@ func TestServiceCreateAcceptsMaximumSafePrice(t *testing.T) {
 }
 
 func TestServiceListReturnsRepositoryTickets(t *testing.T) {
-	service := NewService(fakeRepository{tickets: []Ticket{{
+	service := newTestService(fakeRepository{tickets: []Ticket{{
 		ID:     "ticket-1",
 		Price:  100,
 		Title:  "Concert ticket",
@@ -91,7 +91,7 @@ func TestServiceListReturnsRepositoryTickets(t *testing.T) {
 }
 
 func TestServiceGetReturnsTicket(t *testing.T) {
-	service := NewService(fakeRepository{ticket: Ticket{
+	service := newTestService(fakeRepository{ticket: Ticket{
 		ID:     "ticket-1",
 		Price:  100,
 		Title:  "Concert ticket",
@@ -109,11 +109,12 @@ func TestServiceGetReturnsTicket(t *testing.T) {
 }
 
 func TestServiceUpdateRejectsInvalidInput(t *testing.T) {
-	service := NewService(fakeRepository{})
+	service := newTestService(fakeRepository{})
 
 	_, validationErrors, err := service.UpdateTicket(context.Background(), "ticket-1", UpdateInput{
-		Price:  100,
-		UserID: "owner-1",
+		IdempotencyKey: "update-1",
+		Price:          100,
+		UserID:         "owner-1",
 	})
 
 	if err != nil {
@@ -125,15 +126,16 @@ func TestServiceUpdateRejectsInvalidInput(t *testing.T) {
 }
 
 func TestServiceUpdateRejectsNonOwner(t *testing.T) {
-	service := NewService(fakeRepository{ticket: Ticket{
+	service := newTestService(fakeRepository{ticket: Ticket{
 		ID:     "ticket-1",
 		UserID: "owner-1",
 	}})
 
 	_, validationErrors, err := service.UpdateTicket(context.Background(), "ticket-1", UpdateInput{
-		Title:  "Updated concert ticket",
-		Price:  100,
-		UserID: "other-user",
+		IdempotencyKey: "update-1",
+		Title:          "Updated concert ticket",
+		Price:          100,
+		UserID:         "other-user",
 	})
 
 	if len(validationErrors) != 0 {
@@ -145,15 +147,16 @@ func TestServiceUpdateRejectsNonOwner(t *testing.T) {
 }
 
 func TestServiceUpdateReturnsUpdatedTicket(t *testing.T) {
-	service := NewService(fakeRepository{ticket: Ticket{
+	service := newTestService(fakeRepository{ticket: Ticket{
 		ID:     "ticket-1",
 		UserID: "owner-1",
 	}})
 
 	updated, validationErrors, err := service.UpdateTicket(context.Background(), "ticket-1", UpdateInput{
-		Title:  "Updated concert ticket",
-		Price:  200,
-		UserID: "owner-1",
+		IdempotencyKey: "update-1",
+		Title:          "Updated concert ticket",
+		Price:          200,
+		UserID:         "owner-1",
 	})
 
 	if err != nil {
@@ -170,6 +173,10 @@ func TestServiceUpdateReturnsUpdatedTicket(t *testing.T) {
 type fakeRepository struct {
 	ticket  Ticket
 	tickets []Ticket
+}
+
+func newTestService(repository fakeRepository) *Service {
+	return NewService(repository, repository)
 }
 
 func (fakeRepository) Create(_ context.Context, input CreateInput) (Ticket, error) {
@@ -192,6 +199,13 @@ func (repository fakeRepository) Update(_ context.Context, id string, input Upda
 	if repository.ticket.ID == "" {
 		return Ticket{}, ErrNotFound
 	}
+	if repository.ticket.UserID != input.UserID {
+		return Ticket{}, ErrForbidden
+	}
 
-	return Ticket{ID: id, Title: input.Title, Price: input.Price, UserID: input.UserID}, nil
+	return Ticket{ID: id, Title: input.Title, Price: input.Price, UserID: input.UserID, AggregateVersion: repository.ticket.AggregateVersion + 1}, nil
+}
+
+func (repository fakeRepository) UpdateWithIdempotency(ctx context.Context, id string, input UpdateInput) (Ticket, error) {
+	return repository.Update(ctx, id, input)
 }

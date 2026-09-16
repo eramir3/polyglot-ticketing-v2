@@ -70,7 +70,7 @@ func main() {
 	server := grpc.NewServer()
 	ticketsv1.RegisterTicketsServiceServer(
 		server,
-		grpcserver.NewServer(ticket.NewServiceWithTicketCreationCoordinator(repository, coordinator), slog.Default()),
+		grpcserver.NewServer(ticket.NewService(repository, coordinator), slog.Default()),
 	)
 
 	go func() {

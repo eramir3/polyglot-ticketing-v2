@@ -80,3 +80,47 @@ func (coordinator *Coordinator) Create(ctx context.Context, input ticket.CreateI
 	}
 	return result, nil
 }
+
+func (coordinator *Coordinator) Update(ctx context.Context, id string, input ticket.UpdateInput) (ticket.Ticket, error) {
+	// This deadline bounds the caller's wait without canceling the accepted
+	// workflow update or the activity retries it may require.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	workflowID := "ticket-updates/" + id
+	updateID := "update-ticket/" + operationKey([]string{id, input.UserID, input.IdempotencyKey})
+	start := coordinator.Client.NewWithStartWorkflowOperation(client.StartWorkflowOptions{
+		ID: workflowID, TaskQueue: coordinator.TaskQueue,
+		WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
+	}, UpdateTicketWorkflow)
+	handle, err := coordinator.Client.UpdateWithStartWorkflow(ctx, client.UpdateWithStartWorkflowOptions{
+		StartWorkflowOperation: start,
+		UpdateOptions: client.UpdateWorkflowOptions{
+			UpdateID:     updateID,
+			UpdateName:   UpdateTicketName,
+			Args:         []any{UpdateTicketInput{ID: id, IdempotencyKey: input.IdempotencyKey, Title: input.Title, Price: input.Price, UserID: input.UserID}},
+			WaitForStage: client.WorkflowUpdateStageCompleted,
+		},
+	})
+	if err != nil {
+		return ticket.Ticket{}, ticket.ErrUnavailable
+	}
+	var result ticket.Ticket
+	if err := handle.Get(ctx, &result); err != nil {
+		if ctx.Err() != nil {
+			return ticket.Ticket{}, ticket.ErrUnavailable
+		}
+		var applicationFailure *temporal.ApplicationError
+		if errors.As(err, &applicationFailure) {
+			switch applicationFailure.Type() {
+			case "TicketUpdateForbidden":
+				return ticket.Ticket{}, ticket.ErrForbidden
+			case "TicketUpdateNotFound":
+				return ticket.Ticket{}, ticket.ErrNotFound
+			case "InvalidTicketUpdate", "InvalidProjection":
+				return ticket.Ticket{}, err
+			}
+		}
+		return ticket.Ticket{}, ticket.ErrUnavailable
+	}
+	return result, nil
+}

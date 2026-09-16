@@ -30,6 +30,7 @@ message UpdateTicketRequest {
   string title = 2;
   int64 price = 3;
   string user_id = 4;
+  string idempotency_key = 5;
 }
 
 message UpdateTicketResponse {

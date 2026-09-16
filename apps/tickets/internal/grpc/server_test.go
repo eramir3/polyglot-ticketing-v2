@@ -18,7 +18,7 @@ import (
 func TestCreateTicketLogsUnexpectedFailure(t *testing.T) {
 	var logs bytes.Buffer
 	server := NewServer(
-		ticket.NewService(failingTicketRepository{}),
+		ticket.NewService(failingTicketRepository{}, failingTicketRepository{}),
 		slog.New(slog.NewTextHandler(&logs, nil)),
 	)
 
@@ -47,15 +47,16 @@ func TestCreateTicketLogsUnexpectedFailure(t *testing.T) {
 func TestUpdateTicketLogsUnexpectedFailure(t *testing.T) {
 	var logs bytes.Buffer
 	server := NewServer(
-		ticket.NewService(failingTicketUpdateRepository{}),
+		ticket.NewService(failingTicketUpdateRepository{}, failingTicketUpdateRepository{}),
 		slog.New(slog.NewTextHandler(&logs, nil)),
 	)
 
 	_, err := server.UpdateTicket(context.Background(), &ticketsv1.UpdateTicketRequest{
-		Id:     "ticket-1",
-		Title:  "Updated concert ticket",
-		Price:  10_000,
-		UserId: "user-1",
+		Id:             "ticket-1",
+		IdempotencyKey: "update-1",
+		Title:          "Updated concert ticket",
+		Price:          10_000,
+		UserId:         "user-1",
 	})
 
 	if status.Code(err) != codes.Internal {
@@ -93,6 +94,10 @@ func (failingTicketRepository) Update(context.Context, string, ticket.UpdateInpu
 	return ticket.Ticket{}, ticket.ErrNotFound
 }
 
+func (failingTicketRepository) UpdateWithIdempotency(context.Context, string, ticket.UpdateInput) (ticket.Ticket, error) {
+	return ticket.Ticket{}, ticket.ErrNotFound
+}
+
 type failingTicketUpdateRepository struct {
 	failingTicketRepository
 }
@@ -102,5 +107,9 @@ func (failingTicketUpdateRepository) FindByID(context.Context, string) (ticket.T
 }
 
 func (failingTicketUpdateRepository) Update(context.Context, string, ticket.UpdateInput) (ticket.Ticket, error) {
+	return ticket.Ticket{}, errors.New("database unavailable")
+}
+
+func (failingTicketUpdateRepository) UpdateWithIdempotency(context.Context, string, ticket.UpdateInput) (ticket.Ticket, error) {
 	return ticket.Ticket{}, errors.New("database unavailable")
 }

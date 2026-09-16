@@ -1,6 +1,6 @@
 services:
   temporal:
-    image: temporalio/temporal:1.6.1
+    image: temporalio/temporal:1.9.1
     command:
       [
         'server',
@@ -31,7 +31,7 @@ services:
       retries: 20
 
   temporal-namespace:
-    image: temporalio/temporal:1.6.1
+    image: temporalio/temporal:1.9.1
     command:
       [
         'operator',

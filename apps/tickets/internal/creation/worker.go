@@ -9,15 +9,16 @@ import (
 )
 
 // NewWorker configures the Temporal worker that executes durable ticket
-// creation workflows and their activities.
+// creation and update workflows with the Tickets repository.
 func NewWorker(
 	temporalClient client.Client,
 	taskQueue string,
-	repository ticket.TicketPersister,
+	repository ticket.Repository,
 	ordersClient ordersv1.OrdersServiceClient,
 ) worker.Worker {
 	temporalWorker := worker.New(temporalClient, taskQueue, worker.Options{})
 	temporalWorker.RegisterWorkflow(CreateTicketWorkflow)
+	temporalWorker.RegisterWorkflow(UpdateTicketWorkflow)
 	temporalWorker.RegisterActivity(&Activities{
 		Repository: repository,
 		Orders:     ordersClient,

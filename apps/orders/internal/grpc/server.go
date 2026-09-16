@@ -32,7 +32,7 @@ func NewServer(service *order.Service, logger *slog.Logger, projection TicketPro
 }
 
 func (server *Server) EnsureTicketProjection(ctx context.Context, request *ordersv1.EnsureTicketProjectionRequest) (*ordersv1.EnsureTicketProjectionResponse, error) {
-	input := order.Ticket{ID: request.GetId(), Title: request.GetTitle(), Price: request.GetPrice()}
+	input := order.Ticket{ID: request.GetId(), Title: request.GetTitle(), Price: request.GetPrice(), AggregateVersion: request.GetAggregateVersion()}
 	if !order.ValidateProjection(input) {
 		return nil, status.Error(codes.InvalidArgument, "Invalid ticket projection")
 	}
@@ -40,6 +40,9 @@ func (server *Server) EnsureTicketProjection(ctx context.Context, request *order
 		return nil, status.Error(codes.Unavailable, "Projection repository unavailable")
 	}
 	err := server.projection.EnsureTicketProjection(ctx, input)
+	if errors.Is(err, order.ErrProjectionOutOfOrder) {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
 	if errors.Is(err, order.ErrProjectionConflict) {
 		return nil, status.Error(codes.AlreadyExists, err.Error())
 	}

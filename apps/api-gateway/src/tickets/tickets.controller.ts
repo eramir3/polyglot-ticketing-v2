@@ -36,8 +36,9 @@ export class TicketsController {
     @Param('id') id: string,
     @Body() dto: UpdateTicketDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<Ticket> {
-    return this.ticketsService.updateTicket(id, dto, user.id);
+    return this.ticketsService.updateTicket(id, dto, user.id, idempotencyKey);
   }
 
   @Post()

@@ -19,6 +19,7 @@ message EnsureTicketProjectionRequest {
   string id = 1;
   string title = 2;
   int64 price = 3;
+  int64 aggregate_version = 4;
 }
 
 message EnsureTicketProjectionResponse {}

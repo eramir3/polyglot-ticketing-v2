@@ -60,7 +60,7 @@ describe('tickets endpoints', () => {
         .withPassword('orders-test-password')
         .start(),
     ]);
-    temporal = await new GenericContainer('temporalio/temporal:1.6.1')
+    temporal = await new GenericContainer('temporalio/temporal:1.9.1')
       .withCommand([
         'server',
         'start-dev',
@@ -370,6 +370,7 @@ describe('tickets endpoints', () => {
         created.id,
         { price: 18_000, title: 'The National Updated' },
         anotherUser.sessionCookie,
+        randomUUID(),
       );
 
       expect(response.status).toBe(403);
@@ -387,6 +388,7 @@ describe('tickets endpoints', () => {
         randomUUID(),
         { price: 18_000, title: 'Metallica Updated' },
         sessionCookie,
+        randomUUID(),
       );
 
       expect(response.status).toBe(404);
@@ -447,6 +449,7 @@ describe('tickets endpoints', () => {
         created.id,
         { price: 18_000, title: 'Mastodon Updated' },
         sessionCookie,
+        randomUUID(),
       );
 
       expect(response.status).toBe(200);
@@ -465,8 +468,9 @@ describe('tickets endpoints', () => {
           price: string;
           title: string;
           user_id: string;
+          aggregate_version: string;
         }>(
-          `SELECT id::text, price::text, title, user_id
+          `SELECT id::text, price::text, title, user_id, aggregate_version::text
          FROM tickets
          WHERE id = $1`,
           [created.id],
@@ -478,11 +482,88 @@ describe('tickets endpoints', () => {
             price: '18000',
             title: 'Mastodon Updated',
             user_id: userId,
+            aggregate_version: '2',
           },
         ]);
       } finally {
         await database.end();
       }
+
+      expect(
+        await queryRows(
+          ordersDatabaseUrl,
+          'SELECT id::text, title, price::text, aggregate_version::text FROM tickets WHERE id = $1',
+          [created.id],
+        ),
+      ).toEqual([
+        {
+          id: created.id,
+          title: 'Mastodon Updated',
+          price: '18000',
+          aggregate_version: '2',
+        },
+      ]);
+    });
+
+    it('requires an idempotency key for a valid update', async () => {
+      const createdResponse = await postTicket(
+        { price: 15_000, title: 'Key required' },
+        sessionCookie,
+      );
+      expect(createdResponse.status).toBe(201);
+      const created = createdResponse.body as { id: string };
+
+      const response = await putTicket(
+        created.id,
+        { price: 18_000, title: 'Key required updated' },
+        sessionCookie,
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        errors: [
+          expect.objectContaining({
+            code: 'INVALID_ARGUMENT',
+            field: 'idempotencyKey',
+          }),
+        ],
+      });
+    });
+
+    it('returns the original update result when its idempotency key is retried', async () => {
+      const createdResponse = await postTicket(
+        { price: 15_000, title: 'Retry update' },
+        sessionCookie,
+      );
+      expect(createdResponse.status).toBe(201);
+      const created = createdResponse.body as { id: string };
+      const key = randomUUID();
+
+      const first = await putTicket(
+        created.id,
+        { price: 18_000, title: 'First update' },
+        sessionCookie,
+        key,
+      );
+      const retried = await putTicket(
+        created.id,
+        { price: 20_000, title: 'Different retry body' },
+        sessionCookie,
+        key,
+      );
+
+      expect(first.status).toBe(200);
+      expect(retried.status).toBe(200);
+      expect(retried.body).toEqual(first.body);
+      expect(
+        await queryRows(
+          ticketsDatabaseUrl,
+          'SELECT title, price::text, aggregate_version::text FROM tickets WHERE id = $1',
+          [created.id],
+        ),
+      ).toEqual([
+        { title: 'First update', price: '18000', aggregate_version: '2' },
+      ]);
     });
   });
 
@@ -711,8 +792,9 @@ describe('tickets endpoints', () => {
     id: string,
     body: { title: string; price: number },
     cookie?: string,
+    idempotencyKey?: string,
   ): Promise<HttpResponse> {
-    return putJson(`/api/tickets/${id}`, body, cookie);
+    return putJson(`/api/tickets/${id}`, body, cookie, idempotencyKey);
   }
 
   async function postJson(
@@ -754,12 +836,16 @@ describe('tickets endpoints', () => {
     path: string,
     body: Record<string, string | number>,
     cookie?: string,
+    idempotencyKey?: string,
   ): Promise<HttpResponse> {
     const response = await fetch(`${gatewayUrl}${path}`, {
       body: JSON.stringify(body),
       headers: {
         'content-type': 'application/json',
         ...(cookie === undefined ? {} : { cookie }),
+        ...(idempotencyKey === undefined
+          ? {}
+          : { 'Idempotency-Key': idempotencyKey }),
       },
       method: 'PUT',
     });

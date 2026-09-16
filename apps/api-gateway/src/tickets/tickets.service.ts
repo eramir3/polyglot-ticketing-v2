@@ -61,6 +61,7 @@ export class TicketsService implements OnModuleInit {
     id: string,
     request: Pick<UpdateTicketRequest, 'price' | 'title'>,
     userId: string,
+    idempotencyKey?: string,
   ): Promise<Ticket> {
     try {
       const response = await firstValueFrom(
@@ -68,6 +69,7 @@ export class TicketsService implements OnModuleInit {
           ...request,
           id,
           userId,
+          ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
         }),
       );
       return response.ticket;

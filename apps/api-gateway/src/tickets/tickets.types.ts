@@ -16,6 +16,7 @@ export interface CreateTicketResponse {
 
 export interface UpdateTicketRequest {
   id: string;
+  idempotencyKey?: string;
   title: string;
   price: number;
   userId: string;

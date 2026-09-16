@@ -34,9 +34,9 @@
   (or `make generate-proto`); do not hand-edit `protogen/go` or `protogen/ts`.
 - Each service owns its PostgreSQL database and migrations. Do not query or
   write another service's database directly.
-- Tickets creation is a Temporal workflow: persist the Tickets record, then
-  ensure the Orders ticket projection through Orders gRPC. There are no events,
-  outbox patterns, or aggregate versions in the current design.
+- Ticket creation and updates are Temporal workflows. Tickets uses aggregate
+  versions to order writes to the Orders ticket projection through Orders gRPC.
+  There are no events or outbox patterns in the current design.
 
 ## Working Conventions
 
@@ -61,6 +61,9 @@
 - Keys are scoped to the authenticated user. A repeated key returns the first
   workflow result even if the retry body differs; a request without a key is a
   new creation.
+- `PUT /api/tickets/:id` requires an `Idempotency-Key`. Updates are serialized
+  by ticket in Temporal, increment the Tickets aggregate version, and apply the
+  same next version to the Orders projection.
 - Keep Temporal workflow code deterministic. I/O belongs in activities, and
   activities must remain safe to retry by the stable ticket UUID.
 - The Tickets process hosts both the gRPC server and Temporal worker. Keep

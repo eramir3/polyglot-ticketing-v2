@@ -57,9 +57,10 @@ func (server *Server) UpdateTicket(
 	request *ticketsv1.UpdateTicketRequest,
 ) (*ticketsv1.UpdateTicketResponse, error) {
 	updated, validationErrors, err := server.service.UpdateTicket(ctx, request.GetId(), ticket.UpdateInput{
-		Title:  request.GetTitle(),
-		Price:  request.GetPrice(),
-		UserID: request.GetUserId(),
+		IdempotencyKey: request.GetIdempotencyKey(),
+		Title:          request.GetTitle(),
+		Price:          request.GetPrice(),
+		UserID:         request.GetUserId(),
 	})
 	if len(validationErrors) > 0 {
 		return nil, structuredError(codes.InvalidArgument, validationErrors)
