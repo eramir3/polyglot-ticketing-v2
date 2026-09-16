@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package orders.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "polyglot-ticketing-v2/protogen/go/orders/v1;ordersv1";
@@ -23,8 +24,8 @@ message EnsureTicketProjectionRequest {
 message EnsureTicketProjectionResponse {}
 
 message CreateOrderRequest {
-  string ticket_id = 1;
-  string user_id = 2;
+  string ticket_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.pattern = ".*\\S.*"];
 }
 
 message CreateOrderResponse {
@@ -37,8 +38,8 @@ message CreateOrderResponse {
 }
 
 message CancelOrderRequest {
-  string order_id = 1;
-  string user_id = 2;
+  string order_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.pattern = ".*\\S.*"];
 }
 
 message CancelOrderResponse {
@@ -46,8 +47,8 @@ message CancelOrderResponse {
 }
 
 message GetOrderRequest {
-  string order_id = 1;
-  string user_id = 2;
+  string order_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.pattern = ".*\\S.*"];
 }
 
 message GetOrderResponse {
@@ -55,7 +56,7 @@ message GetOrderResponse {
 }
 
 message ListOrdersRequest {
-  string user_id = 1;
+  string user_id = 1 [(buf.validate.field).string.pattern = ".*\\S.*"];
 }
 
 message ListOrdersResponse {

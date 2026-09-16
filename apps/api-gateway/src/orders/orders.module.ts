@@ -18,7 +18,10 @@ import { OrdersService } from './orders.service';
         transport: Transport.GRPC,
         options: {
           loader: {
-            includeDirs: [join(process.cwd(), 'proto')],
+            includeDirs: [
+              join(process.cwd(), 'proto'),
+              join(process.cwd(), 'proto-deps'),
+            ],
             ...ORDERS_GRPC_LOADER_OPTIONS,
           },
           package: 'orders.v1',

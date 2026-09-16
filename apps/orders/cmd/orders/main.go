@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"buf.build/go/protovalidate"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 
@@ -27,6 +28,11 @@ func main() {
 	defer pool.Close()
 
 	repository := order.NewPostgresRepository(pool)
+	validator, err := protovalidate.New()
+	if err != nil {
+		slog.Error("failed to create request validator", "error", err)
+		os.Exit(1)
+	}
 
 	listener, err := net.Listen("tcp", ":"+environmentVariable("GRPC_PORT", "50053"))
 	if err != nil {
@@ -34,7 +40,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := grpc.NewServer()
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcserver.ValidationInterceptor(validator)),
+	)
 	ordersv1.RegisterOrdersServiceServer(
 		server,
 		grpcserver.NewServer(order.NewService(repository), slog.Default(), repository),
