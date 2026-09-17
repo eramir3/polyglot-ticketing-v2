@@ -201,8 +201,20 @@ func (repository *fakeTicketReservationRepository) CancelOrder(ctx context.Conte
 	return repository.CancelByIDAndUser(ctx, orderID, userID)
 }
 
+func (repository *fakeTicketReservationRepository) ResolvePaymentOutcome(context.Context, string, PaymentOutcome) (Order, error) {
+	return Order{}, repository.err
+}
+
 func (repository *fakeTicketReservationRepository) ExpireCreatedOrder(context.Context, string) (ExpirationResult, error) {
 	return ExpirationResult{}, repository.err
+}
+
+func (repository *fakeTicketReservationRepository) StartPayment(context.Context, string, string) (PaymentOrder, error) {
+	return PaymentOrder{}, repository.err
+}
+
+func (repository *fakeTicketReservationRepository) ResolvePayment(context.Context, string, PaymentOutcome) (PaymentResolutionResult, error) {
+	return PaymentResolutionResult{}, repository.err
 }
 
 func (repository *fakeTicketReservationRepository) GetByIDAndUser(

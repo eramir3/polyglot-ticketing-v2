@@ -1,4 +1,4 @@
-.PHONY: install generate-proto build build-api-gateway build-identity build-tickets build-orders test test-api-gateway test-tickets test-orders serve-api-gateway serve-identity serve-tickets serve-orders
+.PHONY: install generate-proto build build-api-gateway build-identity build-tickets build-orders build-payments test test-api-gateway test-tickets test-orders test-payments serve-api-gateway serve-identity serve-tickets serve-orders serve-payments
 
 install: ## Install workspace dependencies.
 	pnpm install --frozen-lockfile
@@ -6,7 +6,7 @@ install: ## Install workspace dependencies.
 generate-proto: ## Generate TypeScript and Go protobuf bindings.
 	pnpm proto:generate
 
-build: build-api-gateway build-identity build-tickets build-orders ## Build every service.
+build: build-api-gateway build-identity build-tickets build-orders build-payments ## Build every service.
 
 build-api-gateway: ## Build the API gateway.
 	pnpm nx build api-gateway
@@ -20,7 +20,10 @@ build-tickets: ## Build the tickets service.
 build-orders: ## Build the orders service.
 	pnpm nx build orders
 
-test: test-api-gateway test-tickets test-orders ## Run all executable tests.
+build-payments: ## Build the payments service.
+	pnpm nx build payments
+
+test: test-api-gateway test-tickets test-orders test-payments ## Run all executable tests.
 
 test-api-gateway: ## Run API gateway integration tests (requires Docker for Testcontainers).
 	pnpm nx run api-gateway:integration
@@ -30,6 +33,9 @@ test-tickets: ## Run tickets Go tests.
 
 test-orders: ## Run Orders Go tests (requires Docker for PostgreSQL Testcontainers).
 	pnpm nx test orders
+
+test-payments: ## Run Payments Go tests (requires Docker for PostgreSQL Testcontainers).
+	pnpm nx test payments
 
 serve-api-gateway: ## Run the API gateway locally.
 	pnpm nx serve api-gateway
@@ -42,3 +48,6 @@ serve-tickets: ## Run the tickets gRPC service locally.
 
 serve-orders: ## Run the orders ticket-projection service locally.
 	pnpm nx serve orders
+
+serve-payments: ## Run the payments gRPC service locally.
+	pnpm nx serve payments

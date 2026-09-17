@@ -66,6 +66,39 @@ func TestExpirationActivityPreservesAwaitingPayment(t *testing.T) {
 	require.False(t, result.ShouldReleaseTicket)
 }
 
+func TestResolvePaymentWorkflowReleasesTicketAfterFailedPayment(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	var activities *Activities
+	canceled := order.Order{ID: testOrderID, TicketID: testTicketID, Status: order.StatusCanceled}
+	env.OnActivity(activities.ResolvePayment, mock.Anything, ResolvePaymentInput{
+		OrderID: testOrderID,
+		Outcome: order.PaymentOutcomeFailed,
+	}).Return(order.PaymentResolutionResult{Order: canceled, ShouldReleaseTicket: true}, nil).Once()
+	env.OnActivity(activities.ReleaseTicket, mock.Anything, canceled).Return(nil).Once()
+
+	env.ExecuteWorkflow(ResolvePaymentWorkflow, ResolvePaymentInput{OrderID: testOrderID, Outcome: order.PaymentOutcomeFailed})
+
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+}
+
+func TestResolvePaymentWorkflowRetainsTicketAfterSuccessfulPayment(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	var activities *Activities
+	completed := order.Order{ID: testOrderID, TicketID: testTicketID, Status: order.StatusComplete}
+	env.OnActivity(activities.ResolvePayment, mock.Anything, ResolvePaymentInput{
+		OrderID: testOrderID,
+		Outcome: order.PaymentOutcomeSucceeded,
+	}).Return(order.PaymentResolutionResult{Order: completed}, nil).Once()
+
+	env.ExecuteWorkflow(ResolvePaymentWorkflow, ResolvePaymentInput{OrderID: testOrderID, Outcome: order.PaymentOutcomeSucceeded})
+
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+}
+
 type expirationRepository struct {
 	result order.ExpirationResult
 }
@@ -84,6 +117,14 @@ func (repository expirationRepository) ExpireCreatedOrder(context.Context, strin
 
 func (expirationRepository) GetByIDAndUser(context.Context, string, string) (order.Order, error) {
 	return order.Order{}, nil
+}
+
+func (expirationRepository) StartPayment(context.Context, string, string) (order.PaymentOrder, error) {
+	return order.PaymentOrder{}, nil
+}
+
+func (expirationRepository) ResolvePayment(context.Context, string, order.PaymentOutcome) (order.PaymentResolutionResult, error) {
+	return order.PaymentResolutionResult{}, nil
 }
 
 func (expirationRepository) ListByUser(context.Context, string) ([]order.Order, error) {

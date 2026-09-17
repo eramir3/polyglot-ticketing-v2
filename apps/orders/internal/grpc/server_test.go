@@ -92,6 +92,18 @@ func (failingOrderRepository) CancelOrder(context.Context, string, string) (orde
 	return order.Order{}, errors.New("database unavailable")
 }
 
+func (failingOrderRepository) ResolvePaymentOutcome(context.Context, string, order.PaymentOutcome) (order.Order, error) {
+	return order.Order{}, errors.New("database unavailable")
+}
+
 func (failingOrderRepository) ExpireCreatedOrder(context.Context, string) (order.ExpirationResult, error) {
 	return order.ExpirationResult{}, errors.New("database unavailable")
+}
+
+func (failingOrderRepository) StartPayment(context.Context, string, string) (order.PaymentOrder, error) {
+	return order.PaymentOrder{}, errors.New("database unavailable")
+}
+
+func (failingOrderRepository) ResolvePayment(context.Context, string, order.PaymentOutcome) (order.PaymentResolutionResult, error) {
+	return order.PaymentResolutionResult{}, errors.New("database unavailable")
 }

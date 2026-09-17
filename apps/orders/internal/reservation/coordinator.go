@@ -67,6 +67,30 @@ func (coordinator *Coordinator) CancelOrder(ctx context.Context, orderID string,
 	return result, nil
 }
 
+func (coordinator *Coordinator) ResolvePaymentOutcome(ctx context.Context, orderID string, outcome order.PaymentOutcome) (order.Order, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	workflowID := "resolve-payment/" + orderID + "/" + string(outcome)
+	run, err := coordinator.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: coordinator.TaskQueue,
+	}, ResolvePaymentWorkflow, ResolvePaymentInput{OrderID: orderID, Outcome: outcome})
+	var alreadyStarted *serviceerror.WorkflowExecutionAlreadyStarted
+	if errors.As(err, &alreadyStarted) {
+		run = coordinator.Client.GetWorkflow(ctx, workflowID, alreadyStarted.RunId)
+	} else if err != nil {
+		return order.Order{}, order.ErrUnavailable
+	}
+	var resolved order.Order
+	if err := run.Get(ctx, &resolved); err != nil {
+		if ctx.Err() != nil {
+			return order.Order{}, order.ErrUnavailable
+		}
+		return order.Order{}, reservationWorkflowError(err)
+	}
+	return resolved, nil
+}
+
 func reservationWorkflowError(err error) error {
 	var applicationFailure *temporal.ApplicationError
 	if errors.As(err, &applicationFailure) {
@@ -79,6 +103,8 @@ func reservationWorkflowError(err error) error {
 			return order.ErrOrderNotFound
 		case "OrderNotCancelable":
 			return order.ErrOrderNotCancelable
+		case "OrderNotPayable":
+			return order.ErrOrderNotPayable
 		}
 	}
 	return fmt.Errorf("%w: %v", order.ErrUnavailable, err)

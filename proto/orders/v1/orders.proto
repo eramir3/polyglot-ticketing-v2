@@ -9,6 +9,8 @@ option go_package = "polyglot-ticketing-v2/protogen/go/orders/v1;ordersv1";
 
 service OrdersService {
   rpc EnsureTicketProjection(EnsureTicketProjectionRequest) returns (EnsureTicketProjectionResponse);
+  rpc StartPayment(StartPaymentRequest) returns (StartPaymentResponse);
+  rpc ResolvePayment(ResolvePaymentRequest) returns (ResolvePaymentResponse);
   rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
   rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
   rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
@@ -23,6 +25,35 @@ message EnsureTicketProjectionRequest {
 }
 
 message EnsureTicketProjectionResponse {}
+
+// Internal Payments-to-Orders operation. It starts checkout only for the
+// order owner and returns the price snapshot Payments must charge.
+message StartPaymentRequest {
+  string order_id = 1 [(buf.validate.field).string.uuid = true];
+  string user_id = 2 [(buf.validate.field).string.pattern = ".*\\S.*"];
+}
+
+message StartPaymentResponse {
+  PaymentOrder order = 1;
+}
+
+// Internal Payments-to-Orders operation. Payments sends its durable mock or
+// provider result; Orders remains the owner of the order transition.
+message ResolvePaymentRequest {
+  string order_id = 1 [(buf.validate.field).string.uuid = true];
+  PaymentOutcome outcome = 2;
+}
+
+message ResolvePaymentResponse {
+  Order order = 1;
+}
+
+message PaymentOrder {
+  string id = 1;
+  string user_id = 2;
+  int64 price = 3;
+  OrderStatus status = 4;
+}
 
 message CreateOrderRequest {
   string ticket_id = 1 [(buf.validate.field).string.uuid = true];
@@ -78,4 +109,10 @@ enum OrderStatus {
   ORDER_STATUS_CANCELED = 2;
   ORDER_STATUS_AWAITING_PAYMENT = 3;
   ORDER_STATUS_COMPLETE = 4;
+}
+
+enum PaymentOutcome {
+  PAYMENT_OUTCOME_UNSPECIFIED = 0;
+  PAYMENT_OUTCOME_SUCCEEDED = 1;
+  PAYMENT_OUTCOME_FAILED = 2;
 }

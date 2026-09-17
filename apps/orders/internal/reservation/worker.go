@@ -18,6 +18,7 @@ func NewWorker(
 	temporalWorker.RegisterWorkflow(CreateOrderWorkflow)
 	temporalWorker.RegisterWorkflow(CancelOrderWorkflow)
 	temporalWorker.RegisterWorkflow(ExpireOrderWorkflow)
+	temporalWorker.RegisterWorkflow(ResolvePaymentWorkflow)
 	temporalWorker.RegisterActivity(&Activities{Repository: repository, Tickets: ticketsClient})
 	return temporalWorker
 }

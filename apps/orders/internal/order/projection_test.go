@@ -120,3 +120,38 @@ func TestPostgresOverdueAwaitingPaymentOrderBlocksReservation(t *testing.T) {
 		t.Fatalf("expected overdue AwaitingPayment order to block reservation, got %v", err)
 	}
 }
+
+func TestPostgresOverdueCreatedOrderBlocksUntilExpirationWorkflowCancelsIt(t *testing.T) {
+	url := os.Getenv("ORDERS_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("requires isolated ORDERS_TEST_DATABASE_URL")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	repository := NewPostgresRepository(pool)
+	ticketID := uuid.NewString()
+	if err := repository.EnsureTicketProjection(ctx, Ticket{ID: ticketID, Title: "Expired but held", Price: 100, AggregateVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Exec(ctx, "DELETE FROM orders WHERE ticket_id = $1", ticketID)
+	defer pool.Exec(ctx, "DELETE FROM tickets WHERE id = $1", ticketID)
+	reserved, err := repository.ReserveTicket(ctx, TicketReservationInput{
+		ExpiresAt: time.Now().UTC().Add(ExpirationWindow), TicketID: ticketID, UserID: "first-user",
+	})
+	if err != nil || !reserved.Created {
+		t.Fatalf("reserve ticket: %+v, %v", reserved, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orders SET expires_at = NOW() - INTERVAL '1 second' WHERE id = $1", reserved.Order.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repository.ReserveTicket(ctx, TicketReservationInput{
+		ExpiresAt: time.Now().UTC().Add(ExpirationWindow), TicketID: ticketID, UserID: "second-user",
+	})
+	if !errors.Is(err, ErrReserved) {
+		t.Fatalf("expected expired Created order to block until Temporal releases it, got %v", err)
+	}
+}

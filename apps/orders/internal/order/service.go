@@ -22,6 +22,43 @@ type Service struct {
 type Coordinator interface {
 	ReserveTicket(context.Context, TicketReservationInput) (ReservationResult, error)
 	CancelOrder(context.Context, string, string) (Order, error)
+	ResolvePaymentOutcome(context.Context, string, PaymentOutcome) (Order, error)
+}
+
+func (service *Service) StartPayment(
+	ctx context.Context,
+	orderID string,
+	userID string,
+) (PaymentOrder, []ValidationError, error) {
+	if validationErrors := validateOrderID(orderID); len(validationErrors) > 0 {
+		return PaymentOrder{}, validationErrors, nil
+	}
+	if validationErrors := validateOrderUser(userID); len(validationErrors) > 0 {
+		return PaymentOrder{}, validationErrors, nil
+	}
+
+	started, err := service.repository.StartPayment(ctx, orderID, userID)
+	return started, nil, err
+}
+
+func (service *Service) ResolvePayment(
+	ctx context.Context,
+	orderID string,
+	outcome PaymentOutcome,
+) (Order, []ValidationError, error) {
+	if validationErrors := validateOrderID(orderID); len(validationErrors) > 0 {
+		return Order{}, validationErrors, nil
+	}
+	if outcome != PaymentOutcomeSucceeded && outcome != PaymentOutcomeFailed {
+		return Order{}, []ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT),
+			Field:   "outcome",
+			Message: "Payment outcome is required.",
+		}}, nil
+	}
+
+	resolved, err := service.coordinator.ResolvePaymentOutcome(ctx, orderID, outcome)
+	return resolved, nil, err
 }
 
 func NewService(repository OrderRepository, coordinator Coordinator) *Service {

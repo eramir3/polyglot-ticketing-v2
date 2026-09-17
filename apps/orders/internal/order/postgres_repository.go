@@ -64,6 +64,8 @@ func (repository *PostgresRepository) ReserveTicket(ctx context.Context, input T
 	return ReservationResult{Created: true, Order: created}, nil
 }
 
+// findBlockingOrder treats every Created order as blocking. expires_at schedules
+// Temporal's cancellation, but cannot prove the Tickets-service claim was released.
 func findBlockingOrder(ctx context.Context, tx pgx.Tx, ticketID string) (Order, bool, error) {
 	var found Order
 	var status string
@@ -74,7 +76,7 @@ func findBlockingOrder(ctx context.Context, tx pgx.Tx, ticketID string) (Order, 
 		  AND (
 			status = 'Complete'
 			OR status = 'AwaitingPayment'
-			OR (status = 'Created' AND expires_at > NOW())
+			OR status = 'Created'
 		  )
 		ORDER BY CASE WHEN status = 'Complete' THEN 0 ELSE 1 END, expires_at DESC
 		LIMIT 1`, ticketID).Scan(
@@ -190,6 +192,122 @@ func (repository *PostgresRepository) GetByIDAndUser(
 	}
 	found.Status = Status(status)
 
+	return found, nil
+}
+
+// StartPayment atomically starts checkout for a Created order and returns the
+// price snapshot that Payments needs. Replays after checkout started return
+// the same AwaitingPayment snapshot without changing state again.
+func (repository *PostgresRepository) StartPayment(
+	ctx context.Context,
+	orderID string,
+	userID string,
+) (PaymentOrder, error) {
+	var started PaymentOrder
+	var status string
+	err := repository.pool.QueryRow(ctx, `
+		UPDATE orders AS order_row
+		SET status = $3
+		FROM tickets
+		WHERE order_row.id = $1
+		  AND order_row.user_id = $2
+		  AND order_row.ticket_id = tickets.id
+		  AND order_row.status = 'Created'
+		RETURNING order_row.id::text, order_row.user_id, tickets.price, order_row.status::text`,
+		orderID,
+		userID,
+		StatusAwaitingPayment,
+	).Scan(&started.ID, &started.UserID, &started.Price, &status)
+	if err == nil {
+		started.Status = Status(status)
+		return started, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return PaymentOrder{}, err
+	}
+
+	err = repository.pool.QueryRow(ctx, `
+		SELECT order_row.id::text, order_row.user_id, tickets.price, order_row.status::text
+		FROM orders AS order_row
+		JOIN tickets ON tickets.id = order_row.ticket_id
+		WHERE order_row.id = $1 AND order_row.user_id = $2`, orderID, userID,
+	).Scan(&started.ID, &started.UserID, &started.Price, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PaymentOrder{}, ErrOrderNotFound
+	}
+	if err != nil {
+		return PaymentOrder{}, err
+	}
+	started.Status = Status(status)
+	if started.Status != StatusAwaitingPayment {
+		return PaymentOrder{}, ErrOrderNotPayable
+	}
+	return started, nil
+}
+
+// ResolvePayment records Payments' first terminal result. A failed result
+// asks the workflow to release the Tickets-service claim after cancellation.
+func (repository *PostgresRepository) ResolvePayment(
+	ctx context.Context,
+	orderID string,
+	outcome PaymentOutcome,
+) (PaymentResolutionResult, error) {
+	var targetStatus Status
+	var shouldReleaseTicket bool
+	switch outcome {
+	case PaymentOutcomeSucceeded:
+		targetStatus = StatusComplete
+	case PaymentOutcomeFailed:
+		targetStatus = StatusCanceled
+		shouldReleaseTicket = true
+	default:
+		return PaymentResolutionResult{}, ErrOrderNotPayable
+	}
+
+	var resolved Order
+	var status string
+	err := repository.pool.QueryRow(ctx, `
+		UPDATE orders
+		SET status = $2
+		WHERE id = $1 AND status = 'AwaitingPayment'
+		RETURNING id::text, expires_at, user_id, ticket_id::text, status::text`,
+		orderID,
+		targetStatus,
+	).Scan(&resolved.ID, &resolved.ExpiresAt, &resolved.UserID, &resolved.TicketID, &status)
+	if err == nil {
+		resolved.Status = Status(status)
+		return PaymentResolutionResult{Order: resolved, ShouldReleaseTicket: shouldReleaseTicket}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return PaymentResolutionResult{}, err
+	}
+
+	found, err := repository.getByID(ctx, orderID)
+	if err != nil {
+		return PaymentResolutionResult{}, err
+	}
+	if (outcome == PaymentOutcomeSucceeded && found.Status == StatusComplete) ||
+		(outcome == PaymentOutcomeFailed && found.Status == StatusCanceled) {
+		return PaymentResolutionResult{Order: found, ShouldReleaseTicket: shouldReleaseTicket}, nil
+	}
+	return PaymentResolutionResult{}, ErrOrderNotPayable
+}
+
+func (repository *PostgresRepository) getByID(ctx context.Context, orderID string) (Order, error) {
+	var found Order
+	var status string
+	err := repository.pool.QueryRow(ctx, `
+		SELECT id::text, expires_at, user_id, ticket_id::text, status::text
+		FROM orders
+		WHERE id = $1`, orderID,
+	).Scan(&found.ID, &found.ExpiresAt, &found.UserID, &found.TicketID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Order{}, ErrOrderNotFound
+	}
+	if err != nil {
+		return Order{}, err
+	}
+	found.Status = Status(status)
 	return found, nil
 }
 

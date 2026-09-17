@@ -249,8 +249,67 @@ services:
     volumes:
       - orders-db-data:/var/lib/postgresql/data
 
+  payments:
+    build:
+      context: .
+      dockerfile: apps/payments/Dockerfile.dev
+    image: payments:dev
+    container_name: payments
+    environment:
+      DATABASE_URL: postgresql://payments:${PAYMENTS_DB_PASSWORD:?PAYMENTS_DB_PASSWORD must be set}@payments-db:5432/payments-db?sslmode=disable
+      GRPC_PORT: 50054
+      ORDERS_GRPC_URL: orders:50053
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      PAYMENTS_TEMPORAL_TASK_QUEUE: payment-processing
+      PAYMENT_PROCESSOR_OUTCOME: ${PAYMENT_PROCESSOR_OUTCOME:-success}
+    depends_on:
+      orders:
+        condition: service_started
+      payments-db:
+        condition: service_healthy
+      payments-migrate:
+        condition: service_completed_successfully
+      temporal-namespace:
+        condition: service_completed_successfully
+    expose:
+      - '50054'
+      - '9090'
+
+  payments-migrate:
+    build:
+      context: .
+      dockerfile: apps/payments/Dockerfile.dev
+    image: payments-migrate:dev
+    container_name: payments-migrate
+    command: ['payments-migrate']
+    environment:
+      DATABASE_URL: postgresql://payments:${PAYMENTS_DB_PASSWORD:?PAYMENTS_DB_PASSWORD must be set}@payments-db:5432/payments-db?sslmode=disable
+    depends_on:
+      payments-db:
+        condition: service_healthy
+    restart: 'no'
+
+  payments-db:
+    image: postgres:17-alpine
+    container_name: payments-db
+    environment:
+      POSTGRES_DB: payments-db
+      POSTGRES_PASSWORD: ${PAYMENTS_DB_PASSWORD:?PAYMENTS_DB_PASSWORD must be set}
+      POSTGRES_USER: payments
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payments -d payments-db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - '5435:5432'
+    volumes:
+      - payments-db-data:/var/lib/postgresql/data
+
 volumes:
   temporal-data:
   identity-db-data:
   orders-db-data:
   tickets-db-data:
+  payments-db-data:

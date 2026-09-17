@@ -55,6 +55,17 @@ func (activities *Activities) ExpireOrder(ctx context.Context, orderID string) (
 	return result, err
 }
 
+func (activities *Activities) ResolvePayment(ctx context.Context, input ResolvePaymentInput) (order.PaymentResolutionResult, error) {
+	result, err := activities.Repository.ResolvePayment(ctx, input.OrderID, input.Outcome)
+	if errors.Is(err, order.ErrOrderNotFound) {
+		return order.PaymentResolutionResult{}, temporal.NewNonRetryableApplicationError("Order not found", "OrderNotFound", err)
+	}
+	if errors.Is(err, order.ErrOrderNotPayable) {
+		return order.PaymentResolutionResult{}, temporal.NewNonRetryableApplicationError("Order cannot be resolved by payment", "OrderNotPayable", err)
+	}
+	return result, err
+}
+
 func (activities *Activities) ReleaseTicket(ctx context.Context, found order.Order) error {
 	_, err := activities.Tickets.ReleaseTicketReservation(ctx, &ticketsv1.ReleaseTicketReservationRequest{
 		TicketId: found.TicketID,

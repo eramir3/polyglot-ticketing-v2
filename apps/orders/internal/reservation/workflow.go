@@ -21,6 +21,11 @@ type ExpireInput struct {
 	TicketID  string
 }
 
+type ResolvePaymentInput struct {
+	OrderID string
+	Outcome order.PaymentOutcome
+}
+
 func activityContext(ctx workflow.Context) workflow.Context {
 	return workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Second,
@@ -102,4 +107,21 @@ func ExpireOrderWorkflow(ctx workflow.Context, input ExpireInput) error {
 		return nil
 	}
 	return workflow.ExecuteActivity(activitiesContext, activities.ReleaseTicket, expiration.Order).Get(ctx, nil)
+}
+
+// ResolvePaymentWorkflow makes the Orders transition durable. Failed payments
+// keep retrying their Tickets release after recording Canceled first.
+func ResolvePaymentWorkflow(ctx workflow.Context, input ResolvePaymentInput) (order.Order, error) {
+	activitiesContext := activityContext(ctx)
+	var activities *Activities
+	var resolution order.PaymentResolutionResult
+	if err := workflow.ExecuteActivity(activitiesContext, activities.ResolvePayment, input).Get(ctx, &resolution); err != nil {
+		return order.Order{}, err
+	}
+	if resolution.ShouldReleaseTicket {
+		if err := workflow.ExecuteActivity(activitiesContext, activities.ReleaseTicket, resolution.Order).Get(ctx, nil); err != nil {
+			return order.Order{}, err
+		}
+	}
+	return resolution.Order, nil
 }

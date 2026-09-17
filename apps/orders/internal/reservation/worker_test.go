@@ -33,6 +33,14 @@ func (workerRepository) ExpireCreatedOrder(context.Context, string) (order.Expir
 	return order.ExpirationResult{}, nil
 }
 
+func (workerRepository) StartPayment(context.Context, string, string) (order.PaymentOrder, error) {
+	return order.PaymentOrder{}, nil
+}
+
+func (workerRepository) ResolvePayment(context.Context, string, order.PaymentOutcome) (order.PaymentResolutionResult, error) {
+	return order.PaymentResolutionResult{}, nil
+}
+
 func (workerRepository) GetByIDAndUser(context.Context, string, string) (order.Order, error) {
 	return order.Order{}, nil
 }

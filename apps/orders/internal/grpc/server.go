@@ -53,6 +53,72 @@ func (server *Server) EnsureTicketProjection(ctx context.Context, request *order
 	return &ordersv1.EnsureTicketProjectionResponse{}, nil
 }
 
+func (server *Server) StartPayment(
+	ctx context.Context,
+	request *ordersv1.StartPaymentRequest,
+) (*ordersv1.StartPaymentResponse, error) {
+	started, validationErrors, err := server.service.StartPayment(ctx, request.GetOrderId(), request.GetUserId())
+	if len(validationErrors) > 0 {
+		return nil, structuredError(codes.InvalidArgument, validationErrors)
+	}
+	if errors.Is(err, order.ErrOrderNotFound) {
+		return nil, structuredError(codes.NotFound, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
+			Message: "Order not found.",
+		}})
+	}
+	if errors.Is(err, order.ErrOrderNotPayable) {
+		return nil, structuredError(codes.AlreadyExists, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_ALREADY_EXISTS),
+			Message: "Order cannot be paid.",
+		}})
+	}
+	if err != nil {
+		server.logger.Error("payment start failed", "operation", "start_payment", "order_id", request.GetOrderId(), "error", err)
+		return nil, structuredError(codes.Internal, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),
+			Message: "Unable to start payment.",
+		}})
+	}
+	return &ordersv1.StartPaymentResponse{Order: toPaymentOrderResponse(started)}, nil
+}
+
+func (server *Server) ResolvePayment(
+	ctx context.Context,
+	request *ordersv1.ResolvePaymentRequest,
+) (*ordersv1.ResolvePaymentResponse, error) {
+	resolved, validationErrors, err := server.service.ResolvePayment(ctx, request.GetOrderId(), toPaymentOutcome(request.GetOutcome()))
+	if len(validationErrors) > 0 {
+		return nil, structuredError(codes.InvalidArgument, validationErrors)
+	}
+	if errors.Is(err, order.ErrOrderNotFound) {
+		return nil, structuredError(codes.NotFound, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
+			Message: "Order not found.",
+		}})
+	}
+	if errors.Is(err, order.ErrOrderNotPayable) {
+		return nil, structuredError(codes.AlreadyExists, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_ALREADY_EXISTS),
+			Message: "Order cannot be resolved by payment.",
+		}})
+	}
+	if errors.Is(err, order.ErrUnavailable) {
+		return nil, structuredError(codes.Unavailable, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_SERVICE_UNAVAILABLE),
+			Message: "Unable to resolve payment.",
+		}})
+	}
+	if err != nil {
+		server.logger.Error("payment resolution failed", "operation", "resolve_payment", "order_id", request.GetOrderId(), "error", err)
+		return nil, structuredError(codes.Internal, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_INTERNAL_ERROR),
+			Message: "Unable to resolve payment.",
+		}})
+	}
+	return &ordersv1.ResolvePaymentResponse{Order: toOrderResponse(resolved)}, nil
+}
+
 func (server *Server) CancelOrder(
 	ctx context.Context,
 	request *ordersv1.CancelOrderRequest,
@@ -220,6 +286,26 @@ func toOrderResponse(found order.Order) *ordersv1.Order {
 		Status:    toOrderStatus(found.Status),
 		TicketId:  found.TicketID,
 		UserId:    found.UserID,
+	}
+}
+
+func toPaymentOrderResponse(found order.PaymentOrder) *ordersv1.PaymentOrder {
+	return &ordersv1.PaymentOrder{
+		Id:     found.ID,
+		Price:  found.Price,
+		Status: toOrderStatus(found.Status),
+		UserId: found.UserID,
+	}
+}
+
+func toPaymentOutcome(value ordersv1.PaymentOutcome) order.PaymentOutcome {
+	switch value {
+	case ordersv1.PaymentOutcome_PAYMENT_OUTCOME_SUCCEEDED:
+		return order.PaymentOutcomeSucceeded
+	case ordersv1.PaymentOutcome_PAYMENT_OUTCOME_FAILED:
+		return order.PaymentOutcomeFailed
+	default:
+		return ""
 	}
 }
 
