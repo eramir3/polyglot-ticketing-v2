@@ -46,6 +46,9 @@ func (activities *Activities) PersistTicketUpdate(ctx context.Context, input Upd
 	if errors.Is(err, ticket.ErrForbidden) {
 		return ticket.Ticket{}, temporal.NewNonRetryableApplicationError("Ticket update forbidden", "TicketUpdateForbidden", err)
 	}
+	if errors.Is(err, ticket.ErrReserved) {
+		return ticket.Ticket{}, temporal.NewNonRetryableApplicationError("Ticket update reserved", "TicketUpdateReserved", err)
+	}
 	if errors.Is(err, ticket.ErrNotFound) {
 		return ticket.Ticket{}, temporal.NewNonRetryableApplicationError("Ticket not found", "TicketUpdateNotFound", err)
 	}

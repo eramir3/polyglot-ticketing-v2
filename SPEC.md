@@ -14,7 +14,7 @@ gateway and identity service; Go is used for Tickets and Orders.
 | Identity    | NestJS                      | Sign-up, sign-in, sessions, and email verification            | Identity PostgreSQL database   |
 | Tickets     | Go                          | Ticket CRUD and durable ticket creation                       | Tickets PostgreSQL database    |
 | Orders      | Go                          | Ticket projection and order reservation lifecycle             | Orders PostgreSQL database     |
-| Temporal    | Temporal development server | Durable orchestration of ticket creation                      | Persistent local SQLite volume |
+| Temporal    | Temporal development server | Durable ticket and order-reservation orchestration            | Persistent local SQLite volume |
 
 Each service writes only its own database. Internal contracts live in `proto/`;
 `protogen/go` and `protogen/ts` are generated artifacts.
@@ -30,13 +30,14 @@ The gateway exposes `/api`-prefixed REST routes. Current resource groups are:
 
 The gateway calls Identity, Tickets, and Orders over gRPC. The protobuf service
 definitions are `IdentityService`, `TicketsService`, and `OrdersService`.
-Orders also exposes the internal `EnsureTicketProjection` RPC, used only by
-Tickets Temporal activities.
+Orders exposes the internal `EnsureTicketProjection` RPC, used only by Tickets
+Temporal activities. Tickets exposes internal reservation RPCs used only by
+Orders Temporal activities.
 
 ## Ticket creation workflow
 
 `POST /api/tickets` validates the request and forwards the authenticated user
-ID to Tickets. Tickets uses `TicketCreationCoordinator` to start or join
+ID to Tickets. Tickets uses its `Coordinator` to start or join
 `CreateTicketWorkflow` in Temporal.
 
 ```text
@@ -75,18 +76,31 @@ intentionally has no observability implementation yet.
 
 `PUT /api/tickets/:id` requires an `Idempotency-Key` header. Tickets starts or
 joins a long-lived Temporal workflow for that ticket; update handlers run one at
-a time. The persistence activity atomically records the key and increments the
-Tickets aggregate version, then the projection activity applies that exact next
-version in Orders. A retry with the same ticket, user, and key returns the
-original snapshot even if its body differs. Workflows continue as new after 100
+a time. A ticket reserved by an order returns `403 FORBIDDEN` before Tickets
+checks the idempotency ledger, so even a prior successful key is forbidden while
+the claim exists. Otherwise, the persistence activity atomically records the
+key and increments the Tickets aggregate version, then the projection activity
+applies that exact next version in Orders. Workflows continue as new after 100
 completed updates; the Tickets update-operation table remains the durable
 idempotency record across workflow runs.
+
+## Order reservation workflow
+
+`POST /api/orders` starts an Orders Temporal workflow. It persists or retrieves
+the user’s active order, claims the Tickets source row by order ID through
+internal Tickets gRPC, and only then returns success. A child workflow tracks
+the 15-minute `Created` deadline. At expiry it changes a still-`Created` order
+to `Canceled` and conditionally releases that exact ticket claim. `DELETE
+/api/orders/:id` uses the same durable cancel-then-release sequence.
+
+`Complete` orders retain their claim. `AwaitingPayment` transitions and their
+reservation policy are deferred to the Payments service.
 
 ## Persistence
 
 - Identity, Tickets, and Orders each run PostgreSQL 17 locally.
-- Tickets owns its `tickets` source table, including title, price, user ID, and
-  ticket ID.
+- Tickets owns its `tickets` source table, including title, price, user ID,
+  ticket ID, and `reserved_by_order_id`.
 - Orders owns a ticket projection table and its orders table. Orders may create
   an order only for a projected ticket.
 - SQL migrations are forward-only and live under the owning service's

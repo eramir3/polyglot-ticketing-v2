@@ -24,7 +24,7 @@ const (
 func TestCreateOrderLogsUnexpectedFailure(t *testing.T) {
 	var logs bytes.Buffer
 	server := NewServer(
-		order.NewService(failingOrderRepository{}),
+		order.NewService(failingOrderRepository{}, failingOrderRepository{}),
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		nil,
 	)
@@ -40,7 +40,7 @@ func TestCreateOrderLogsUnexpectedFailure(t *testing.T) {
 func TestCancelOrderLogsUnexpectedFailure(t *testing.T) {
 	var logs bytes.Buffer
 	server := NewServer(
-		order.NewService(failingOrderRepository{}),
+		order.NewService(failingOrderRepository{}, failingOrderRepository{}),
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		nil,
 	)
@@ -86,4 +86,12 @@ func (failingOrderRepository) ListByUser(context.Context, string) ([]order.Order
 
 func (failingOrderRepository) ReserveTicket(context.Context, order.TicketReservationInput) (order.ReservationResult, error) {
 	return order.ReservationResult{}, errors.New("database unavailable")
+}
+
+func (failingOrderRepository) CancelOrder(context.Context, string, string) (order.Order, error) {
+	return order.Order{}, errors.New("database unavailable")
+}
+
+func (failingOrderRepository) ExpireCreatedOrder(context.Context, string) (order.ExpirationResult, error) {
+	return order.ExpirationResult{}, errors.New("database unavailable")
 }

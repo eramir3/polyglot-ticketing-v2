@@ -98,6 +98,14 @@ func (failingTicketRepository) UpdateWithIdempotency(context.Context, string, ti
 	return ticket.Ticket{}, ticket.ErrNotFound
 }
 
+func (failingTicketRepository) ReserveForOrder(context.Context, string, string) error {
+	return errors.New("database unavailable")
+}
+
+func (failingTicketRepository) ReleaseOrderReservation(context.Context, string, string) error {
+	return errors.New("database unavailable")
+}
+
 type failingTicketUpdateRepository struct {
 	failingTicketRepository
 }

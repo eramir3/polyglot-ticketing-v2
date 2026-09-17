@@ -11,6 +11,7 @@ var (
 	ErrOrderNotCancelable = errors.New("order cannot be canceled")
 	ErrOrderNotFound      = errors.New("order not found")
 	ErrReserved           = errors.New("ticket is reserved")
+	ErrUnavailable        = errors.New("order operation is unavailable or still in progress")
 )
 
 const ExpirationWindow = 15 * time.Minute
@@ -41,6 +42,7 @@ type Order struct {
 
 type TicketReservationInput struct {
 	ExpiresAt time.Time
+	OrderID   string
 	TicketID  string
 	UserID    string
 }
@@ -48,6 +50,13 @@ type TicketReservationInput struct {
 type ReservationResult struct {
 	Created bool
 	Order   Order
+}
+
+// ExpirationResult tells the expiry workflow whether it must release the
+// Tickets-service reservation claim stored in the Tickets database.
+type ExpirationResult struct {
+	Order               Order
+	ShouldReleaseTicket bool
 }
 
 type ValidationError struct {
@@ -58,6 +67,7 @@ type ValidationError struct {
 
 type OrderRepository interface {
 	CancelByIDAndUser(context.Context, string, string) (Order, error)
+	ExpireCreatedOrder(context.Context, string) (ExpirationResult, error)
 	GetByIDAndUser(context.Context, string, string) (Order, error)
 	ReserveTicket(context.Context, TicketReservationInput) (ReservationResult, error)
 	ListByUser(context.Context, string) ([]Order, error)

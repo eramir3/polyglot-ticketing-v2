@@ -51,11 +51,11 @@ func (repository *PostgresRepository) FindByID(ctx context.Context, id string) (
 	var found Ticket
 	err := repository.pool.QueryRow(
 		ctx,
-		`SELECT id, title, price, user_id, aggregate_version
+		`SELECT id, title, price, user_id, aggregate_version, reserved_by_order_id::text
 		 FROM tickets
 		 WHERE id = $1`,
 		id,
-	).Scan(&found.ID, &found.Title, &found.Price, &found.UserID, &found.AggregateVersion)
+	).Scan(&found.ID, &found.Title, &found.Price, &found.UserID, &found.AggregateVersion, &found.ReservedByOrderID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Ticket{}, ErrNotFound
 	}
@@ -66,7 +66,7 @@ func (repository *PostgresRepository) FindByID(ctx context.Context, id string) (
 func (repository *PostgresRepository) List(ctx context.Context) ([]Ticket, error) {
 	rows, err := repository.pool.Query(
 		ctx,
-		`SELECT id, title, price, user_id, aggregate_version
+		`SELECT id, title, price, user_id, aggregate_version, reserved_by_order_id::text
 		 FROM tickets
 		 ORDER BY title ASC, id ASC`,
 	)
@@ -78,7 +78,7 @@ func (repository *PostgresRepository) List(ctx context.Context) ([]Ticket, error
 	tickets := make([]Ticket, 0)
 	for rows.Next() {
 		var listed Ticket
-		if err := rows.Scan(&listed.ID, &listed.Title, &listed.Price, &listed.UserID, &listed.AggregateVersion); err != nil {
+		if err := rows.Scan(&listed.ID, &listed.Title, &listed.Price, &listed.UserID, &listed.AggregateVersion, &listed.ReservedByOrderID); err != nil {
 			return nil, err
 		}
 
@@ -94,7 +94,7 @@ func (repository *PostgresRepository) Update(ctx context.Context, id string, inp
 		ctx,
 		`UPDATE tickets
 		 SET title = $1, price = $2, aggregate_version = aggregate_version + 1
-		 WHERE id = $3 AND user_id = $4
+		 WHERE id = $3 AND user_id = $4 AND reserved_by_order_id IS NULL
 		 RETURNING id, title, price, user_id, aggregate_version`,
 		input.Title,
 		input.Price,
@@ -102,12 +102,15 @@ func (repository *PostgresRepository) Update(ctx context.Context, id string, inp
 		input.UserID,
 	).Scan(&updated.ID, &updated.Title, &updated.Price, &updated.UserID, &updated.AggregateVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Ticket{}, ErrNotFound
+		return Ticket{}, repository.ticketUpdateError(ctx, repository.pool, id, input.UserID)
 	}
 
 	return updated, err
 }
 
+// UpdateWithIdempotency applies one ticket edit and stores its resulting
+// snapshot under the caller's key, so retried requests return the original
+// result without applying the mutation or incrementing its version again.
 func (repository *PostgresRepository) UpdateWithIdempotency(ctx context.Context, id string, input UpdateInput) (Ticket, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
@@ -115,10 +118,33 @@ func (repository *PostgresRepository) UpdateWithIdempotency(ctx context.Context,
 	}
 	defer tx.Rollback(ctx)
 
+	var owner string
+	var reservationID *string
+	// Lock the source row first. A reservation takes precedence over an
+	// idempotency replay: every attempted edit is forbidden while an order holds
+	// the ticket, even if that edit succeeded before the reservation started.
+	err = tx.QueryRow(ctx, `
+		SELECT user_id, reserved_by_order_id::text
+		FROM tickets
+		WHERE id = $1
+		FOR UPDATE`, id,
+	).Scan(&owner, &reservationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Ticket{}, ErrNotFound
+	}
+	if err != nil {
+		return Ticket{}, err
+	}
+	if owner != input.UserID {
+		return Ticket{}, ErrForbidden
+	}
+	if reservationID != nil {
+		return Ticket{}, ErrReserved
+	}
+
 	var existing Ticket
-	// Check whether this exact update was already committed.
-	// If the same idempotency key is retried, return the result recorded from
-	// the original update instead of applying the ticket update a second time.
+	// The row is unreserved, so an idempotent retry can safely return its
+	// original committed snapshot without incrementing the version again.
 	err = tx.QueryRow(ctx, `
 		SELECT ticket_id::text, title, price, user_id, aggregate_version
 		FROM ticket_update_operations
@@ -136,7 +162,8 @@ func (repository *PostgresRepository) UpdateWithIdempotency(ctx context.Context,
 	}
 
 	var updated Ticket
-	// Update the ticket only when it exists and belongs to the authenticated user.
+	// The locked row is owned by the caller and unreserved. Increment the
+	// aggregate version atomically with the mutation.
 	// The aggregate version is incremented atomically with the update so each
 	// successful update produces exactly one new version.
 	err = tx.QueryRow(ctx, `
@@ -146,18 +173,6 @@ func (repository *PostgresRepository) UpdateWithIdempotency(ctx context.Context,
 		RETURNING id, title, price, user_id, aggregate_version`,
 		input.Title, input.Price, id, input.UserID,
 	).Scan(&updated.ID, &updated.Title, &updated.Price, &updated.UserID, &updated.AggregateVersion)
-	if errors.Is(err, pgx.ErrNoRows) {
-		var owner string
-		// Distinguish a missing ticket from a ticket owned by someone else.
-		ownerErr := tx.QueryRow(ctx, `SELECT user_id FROM tickets WHERE id = $1`, id).Scan(&owner)
-		if errors.Is(ownerErr, pgx.ErrNoRows) {
-			return Ticket{}, ErrNotFound
-		}
-		if ownerErr != nil {
-			return Ticket{}, ownerErr
-		}
-		return Ticket{}, ErrForbidden
-	}
 	if err != nil {
 		return Ticket{}, err
 	}
@@ -176,4 +191,83 @@ func (repository *PostgresRepository) UpdateWithIdempotency(ctx context.Context,
 		return Ticket{}, err
 	}
 	return updated, nil
+}
+
+// ReserveForOrder claims an otherwise-unreserved ticket. Repeating the same
+// order claim is safe; a different active order cannot replace the claim.
+func (repository *PostgresRepository) ReserveForOrder(ctx context.Context, ticketID string, orderID string) error {
+	result, err := repository.pool.Exec(ctx, `
+		UPDATE tickets
+		SET reserved_by_order_id = $2
+		WHERE id = $1
+		  AND (reserved_by_order_id IS NULL OR reserved_by_order_id = $2)`, ticketID, orderID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 1 {
+		return nil
+	}
+	_, reservationID, err := ticketOwnerAndReservation(ctx, repository.pool, ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if reservationID != nil {
+		return ErrReserved
+	}
+	return ErrReserved
+}
+
+// ReleaseOrderReservation clears a claim only when it still belongs to the
+// supplied order. It is intentionally a no-op for an already-released or
+// newer claim so Temporal activity retries are safe.
+func (repository *PostgresRepository) ReleaseOrderReservation(ctx context.Context, ticketID string, orderID string) error {
+	result, err := repository.pool.Exec(ctx, `
+		UPDATE tickets
+		SET reserved_by_order_id = NULL
+		WHERE id = $1 AND reserved_by_order_id = $2`, ticketID, orderID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 1 {
+		return nil
+	}
+	_, _, err = ticketOwnerAndReservation(ctx, repository.pool, ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+type ticketRowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (repository *PostgresRepository) ticketUpdateError(ctx context.Context, querier ticketRowQuerier, ticketID string, userID string) error {
+	owner, reservationID, err := ticketOwnerAndReservation(ctx, querier, ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if owner != userID {
+		return ErrForbidden
+	}
+	if reservationID != nil {
+		return ErrReserved
+	}
+	return ErrNotFound
+}
+
+func ticketOwnerAndReservation(ctx context.Context, querier ticketRowQuerier, ticketID string) (string, *string, error) {
+	var owner string
+	var reservationID *string
+	err := querier.QueryRow(ctx, `
+		SELECT user_id, reserved_by_order_id::text
+		FROM tickets
+		WHERE id = $1`, ticketID).Scan(&owner, &reservationID)
+	return owner, reservationID, err
 }

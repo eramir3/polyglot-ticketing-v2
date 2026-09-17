@@ -34,8 +34,9 @@
   (or `make generate-proto`); do not hand-edit `protogen/go` or `protogen/ts`.
 - Each service owns its PostgreSQL database and migrations. Do not query or
   write another service's database directly.
-- Ticket creation and updates are Temporal workflows. Tickets uses aggregate
-  versions to order writes to the Orders ticket projection through Orders gRPC.
+- Ticket creation and updates are Temporal workflows. Orders also uses Temporal
+  for its ticket-reservation lifecycle. Tickets uses aggregate versions to
+  order writes to the Orders ticket projection through Orders gRPC.
   There are no events or outbox patterns in the current design.
 
 ## Working Conventions
@@ -69,6 +70,18 @@
 - The Tickets process hosts both the gRPC server and Temporal worker. Keep
   Temporal components organized under `apps/tickets/internal/creation/`:
   `coordinator.go`, `workflow.go`, `activities.go`, and `worker.go`.
+
+## Ticket Reservation Rules
+
+- Orders claims a Tickets source row through internal Tickets gRPC; Orders must
+  never write the Tickets database directly.
+- A `Created` order holds `tickets.reserved_by_order_id`. All ticket update
+  attempts, including idempotency-key replays, return `FORBIDDEN` while held.
+- Orders' Temporal expiry workflow waits 15 minutes, changes a still-`Created`
+  order to `Canceled`, then releases its matching claim. Explicit cancellation
+  follows the same durable order-then-release sequence.
+- `Complete` retains its claim. `AwaitingPayment` policy belongs to the future
+  Payments service and must be coordinated with the reservation workflow.
 
 ## Verification
 

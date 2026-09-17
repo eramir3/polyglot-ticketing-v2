@@ -71,6 +71,12 @@ func (server *Server) UpdateTicket(
 			Message: "You do not have permission to update this ticket.",
 		}})
 	}
+	if errors.Is(err, ticket.ErrReserved) {
+		return nil, structuredError(codes.PermissionDenied, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_FORBIDDEN),
+			Message: "Ticket cannot be updated while reserved by an order.",
+		}})
+	}
 	if errors.Is(err, ticket.ErrNotFound) {
 		return nil, structuredError(codes.NotFound, []ticket.ValidationError{{
 			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
@@ -91,6 +97,60 @@ func (server *Server) UpdateTicket(
 	}
 
 	return &ticketsv1.UpdateTicketResponse{Ticket: toTicketResponse(updated)}, nil
+}
+
+func (server *Server) ReserveTicketForOrder(
+	ctx context.Context,
+	request *ticketsv1.ReserveTicketForOrderRequest,
+) (*ticketsv1.ReserveTicketForOrderResponse, error) {
+	validationErrors, err := server.service.ReserveTicketForOrder(ctx, request.GetTicketId(), request.GetOrderId())
+	if len(validationErrors) > 0 {
+		return nil, structuredError(codes.InvalidArgument, validationErrors)
+	}
+	if errors.Is(err, ticket.ErrNotFound) {
+		return nil, structuredError(codes.NotFound, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
+			Message: "Ticket not found.",
+		}})
+	}
+	if errors.Is(err, ticket.ErrReserved) {
+		return nil, structuredError(codes.AlreadyExists, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_ALREADY_EXISTS),
+			Message: "Ticket is currently reserved.",
+		}})
+	}
+	if err != nil {
+		server.logger.Error("ticket reservation failed", "operation", "reserve_ticket_for_order", "ticket_id", request.GetTicketId(), "order_id", request.GetOrderId(), "error", err)
+		return nil, structuredError(codes.Unavailable, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_SERVICE_UNAVAILABLE),
+			Message: "Unable to reserve ticket.",
+		}})
+	}
+	return &ticketsv1.ReserveTicketForOrderResponse{}, nil
+}
+
+func (server *Server) ReleaseTicketReservation(
+	ctx context.Context,
+	request *ticketsv1.ReleaseTicketReservationRequest,
+) (*ticketsv1.ReleaseTicketReservationResponse, error) {
+	validationErrors, err := server.service.ReleaseTicketReservation(ctx, request.GetTicketId(), request.GetOrderId())
+	if len(validationErrors) > 0 {
+		return nil, structuredError(codes.InvalidArgument, validationErrors)
+	}
+	if errors.Is(err, ticket.ErrNotFound) {
+		return nil, structuredError(codes.NotFound, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_NOT_FOUND),
+			Message: "Ticket not found.",
+		}})
+	}
+	if err != nil {
+		server.logger.Error("ticket reservation release failed", "operation", "release_ticket_reservation", "ticket_id", request.GetTicketId(), "order_id", request.GetOrderId(), "error", err)
+		return nil, structuredError(codes.Unavailable, []ticket.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_SERVICE_UNAVAILABLE),
+			Message: "Unable to release ticket reservation.",
+		}})
+	}
+	return &ticketsv1.ReleaseTicketReservationResponse{}, nil
 }
 
 func (server *Server) ListTickets(

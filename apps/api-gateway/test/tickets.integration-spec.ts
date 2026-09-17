@@ -126,7 +126,7 @@ describe('tickets endpoints', () => {
         'test',
         './internal/ticket',
         '-run',
-        'TestPostgresCreationRetry',
+        'TestPostgres(CreationRetry|ReservationForbidsEveryTicketUpdateAttempt)',
         '-count=1',
       ],
       { TICKETS_TEST_DATABASE_URL: withSslDisabled(ticketsDatabaseUrl) },
@@ -136,7 +136,7 @@ describe('tickets endpoints', () => {
         'test',
         './internal/order',
         '-run',
-        'TestPostgresProjectionRetry',
+        'TestPostgres(ProjectionRetry|ExpiresCreatedOrder)',
         '-count=1',
       ],
       { ORDERS_TEST_DATABASE_URL: withSslDisabled(ordersDatabaseUrl) },
@@ -564,6 +564,71 @@ describe('tickets endpoints', () => {
       ).toEqual([
         { title: 'First update', price: '18000', aggregate_version: '2' },
       ]);
+    });
+
+    it('forbids fresh and replayed updates while an order reserves the ticket', async () => {
+      const createdResponse = await postTicket(
+        { price: 15_000, title: 'Reserved update' },
+        sessionCookie,
+      );
+      expect(createdResponse.status).toBe(201);
+      const created = createdResponse.body as { id: string };
+      const priorKey = randomUUID();
+      const priorUpdate = await putTicket(
+        created.id,
+        { price: 18_000, title: 'Updated before reservation' },
+        sessionCookie,
+        priorKey,
+      );
+      expect(priorUpdate.status).toBe(200);
+
+      const reservation = await postJson(
+        '/api/orders',
+        { ticketId: created.id },
+        sessionCookie,
+      );
+      expect(reservation.status).toBe(201);
+
+      for (const key of [priorKey, randomUUID()]) {
+        const response = await putTicket(
+          created.id,
+          { price: 20_000, title: 'Forbidden while reserved' },
+          sessionCookie,
+          key,
+        );
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual({
+          errors: [expect.objectContaining({ code: 'FORBIDDEN' })],
+        });
+      }
+      expect(
+        await queryRows(
+          ticketsDatabaseUrl,
+          'SELECT title, price::text, aggregate_version::text FROM tickets WHERE id = $1',
+          [created.id],
+        ),
+      ).toEqual([
+        {
+          title: 'Updated before reservation',
+          price: '18000',
+          aggregate_version: '2',
+        },
+      ]);
+
+      const reservedOrder = reservation.body as { id: string };
+      const canceled = await fetch(`${gatewayUrl}/api/orders/${reservedOrder.id}`, {
+        headers: { cookie: sessionCookie },
+        method: 'DELETE',
+      });
+      expect(canceled.status).toBe(200);
+
+      const afterCancellation = await putTicket(
+        created.id,
+        { price: 20_000, title: 'Editable after cancellation' },
+        sessionCookie,
+        randomUUID(),
+      );
+      expect(afterCancellation.status).toBe(200);
     });
   });
 

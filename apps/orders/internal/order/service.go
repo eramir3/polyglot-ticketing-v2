@@ -12,12 +12,20 @@ import (
 )
 
 type Service struct {
-	now        func() time.Time
-	repository OrderRepository
+	now         func() time.Time
+	repository  OrderRepository
+	coordinator Coordinator
 }
 
-func NewService(repository OrderRepository) *Service {
-	return &Service{now: time.Now, repository: repository}
+// Coordinator owns the durable cross-service reservation and cancellation
+// operations. The production implementation is backed by Temporal.
+type Coordinator interface {
+	ReserveTicket(context.Context, TicketReservationInput) (ReservationResult, error)
+	CancelOrder(context.Context, string, string) (Order, error)
+}
+
+func NewService(repository OrderRepository, coordinator Coordinator) *Service {
+	return &Service{now: time.Now, repository: repository, coordinator: coordinator}
 }
 
 func (service *Service) ReserveTicket(
@@ -29,7 +37,7 @@ func (service *Service) ReserveTicket(
 		return ReservationResult{}, validationErrors, nil
 	}
 
-	reservation, err := service.repository.ReserveTicket(ctx, TicketReservationInput{
+	reservation, err := service.coordinator.ReserveTicket(ctx, TicketReservationInput{
 		ExpiresAt: service.now().UTC().Add(ExpirationWindow),
 		TicketID:  ticketID,
 		UserID:    userID,
@@ -65,7 +73,7 @@ func (service *Service) CancelOrder(
 		return Order{}, validationErrors, nil
 	}
 
-	canceled, err := service.repository.CancelByIDAndUser(ctx, orderID, userID)
+	canceled, err := service.coordinator.CancelOrder(ctx, orderID, userID)
 	return canceled, nil, err
 }
 

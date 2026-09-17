@@ -9,7 +9,7 @@ import (
 func TestServiceReservesTicketForFifteenMinutes(t *testing.T) {
 	fixedNow := time.Date(2026, time.August, 25, 19, 0, 0, 0, time.UTC)
 	repository := &fakeTicketReservationRepository{}
-	service := NewService(repository)
+	service := newTestService(repository)
 	service.now = func() time.Time { return fixedNow }
 	ticketID := "f446d2f3-4515-4b78-8e6a-81797a2517a3"
 
@@ -29,7 +29,7 @@ func TestServiceReservesTicketForFifteenMinutes(t *testing.T) {
 }
 
 func TestServiceRejectsInvalidTicketID(t *testing.T) {
-	_, validationErrors, err := NewService(&fakeTicketReservationRepository{}).ReserveTicket(
+	_, validationErrors, err := newTestService(&fakeTicketReservationRepository{}).ReserveTicket(
 		context.Background(),
 		"not-a-uuid",
 		"user-1",
@@ -44,7 +44,7 @@ func TestServiceRejectsInvalidTicketID(t *testing.T) {
 
 func TestServiceReturnsMissingProjectedTicket(t *testing.T) {
 	repository := &fakeTicketReservationRepository{err: ErrNotFound}
-	_, validationErrors, err := NewService(repository).ReserveTicket(
+	_, validationErrors, err := newTestService(repository).ReserveTicket(
 		context.Background(),
 		"f446d2f3-4515-4b78-8e6a-81797a2517a3",
 		"user-1",
@@ -63,7 +63,7 @@ func TestServiceListsOrdersForUser(t *testing.T) {
 		UserID: "user-1",
 	}}}
 
-	orders, validationErrors, err := NewService(repository).ListOrders(
+	orders, validationErrors, err := newTestService(repository).ListOrders(
 		context.Background(),
 		"user-1",
 	)
@@ -88,7 +88,7 @@ func TestServiceGetsOrderForUser(t *testing.T) {
 		UserID: "user-1",
 	}}
 
-	found, validationErrors, err := NewService(repository).GetOrder(
+	found, validationErrors, err := newTestService(repository).GetOrder(
 		context.Background(),
 		orderID,
 		"user-1",
@@ -115,7 +115,7 @@ func TestServiceCancelsOrderForUser(t *testing.T) {
 		UserID: "user-1",
 	}}
 
-	canceled, validationErrors, err := NewService(repository).CancelOrder(
+	canceled, validationErrors, err := newTestService(repository).CancelOrder(
 		context.Background(),
 		orderID,
 		"user-1",
@@ -135,7 +135,7 @@ func TestServiceCancelsOrderForUser(t *testing.T) {
 }
 
 func TestServiceRejectsInvalidOrderID(t *testing.T) {
-	_, validationErrors, err := NewService(&fakeTicketReservationRepository{}).GetOrder(
+	_, validationErrors, err := newTestService(&fakeTicketReservationRepository{}).GetOrder(
 		context.Background(),
 		"not-a-uuid",
 		"user-1",
@@ -149,7 +149,7 @@ func TestServiceRejectsInvalidOrderID(t *testing.T) {
 }
 
 func TestServiceRejectsInvalidOrderIDWhenCanceling(t *testing.T) {
-	_, validationErrors, err := NewService(&fakeTicketReservationRepository{}).CancelOrder(
+	_, validationErrors, err := newTestService(&fakeTicketReservationRepository{}).CancelOrder(
 		context.Background(),
 		"not-a-uuid",
 		"user-1",
@@ -175,6 +175,10 @@ type fakeTicketReservationRepository struct {
 	orders          []Order
 }
 
+func newTestService(repository *fakeTicketReservationRepository) *Service {
+	return NewService(repository, repository)
+}
+
 func (repository *fakeTicketReservationRepository) CancelByIDAndUser(
 	_ context.Context,
 	orderID string,
@@ -191,6 +195,14 @@ func (repository *fakeTicketReservationRepository) ReserveTicket(
 ) (ReservationResult, error) {
 	repository.input = input
 	return ReservationResult{}, repository.err
+}
+
+func (repository *fakeTicketReservationRepository) CancelOrder(ctx context.Context, orderID string, userID string) (Order, error) {
+	return repository.CancelByIDAndUser(ctx, orderID, userID)
+}
+
+func (repository *fakeTicketReservationRepository) ExpireCreatedOrder(context.Context, string) (ExpirationResult, error) {
+	return ExpirationResult{}, repository.err
 }
 
 func (repository *fakeTicketReservationRepository) GetByIDAndUser(

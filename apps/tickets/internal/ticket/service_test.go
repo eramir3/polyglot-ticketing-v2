@@ -209,3 +209,11 @@ func (repository fakeRepository) Update(_ context.Context, id string, input Upda
 func (repository fakeRepository) UpdateWithIdempotency(ctx context.Context, id string, input UpdateInput) (Ticket, error) {
 	return repository.Update(ctx, id, input)
 }
+
+func (fakeRepository) ReserveForOrder(context.Context, string, string) error {
+	return nil
+}
+
+func (fakeRepository) ReleaseOrderReservation(context.Context, string, string) error {
+	return nil
+}

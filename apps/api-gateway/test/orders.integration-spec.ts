@@ -177,12 +177,13 @@ describe('orders endpoints', () => {
       });
     });
 
-    it('blocks another user while a ticket has an active AwaitingPayment order', async () => {
+    it('blocks another user while a ticket has an overdue AwaitingPayment order', async () => {
       const ticketId = await seedProjectedTicket();
       const created = await postOrder({ ticketId }, sessionCookie);
       await setOrderState(
         (created.body as OrderResponse).id,
         'AwaitingPayment',
+        true,
       );
 
       const response = await postOrder({ ticketId }, anotherUser.sessionCookie);
@@ -400,7 +401,7 @@ describe('orders endpoints', () => {
       });
     });
 
-    it('cancels an AwaitingPayment order belonging to the authenticated user', async () => {
+    it('rejects cancellation of an AwaitingPayment order', async () => {
       const ticketId = await seedProjectedTicket();
       const created = await postOrder({ ticketId }, sessionCookie);
       await setOrderState(
@@ -414,10 +415,9 @@ describe('orders endpoints', () => {
       );
 
       expect(created.status).toBe(201);
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(409);
       expect(response.body).toEqual({
-        ...(created.body as OrderResponse),
-        status: 'Canceled',
+        errors: [expect.objectContaining({ code: 'ALREADY_EXISTS' })],
       });
     });
 

@@ -40,3 +40,11 @@ func (fakeRepository) Update(_ context.Context, id string, input ticket.UpdateIn
 func (fakeRepository) UpdateWithIdempotency(_ context.Context, id string, input ticket.UpdateInput) (ticket.Ticket, error) {
 	return ticket.Ticket{ID: id, Title: input.Title, Price: input.Price, UserID: input.UserID, AggregateVersion: 2}, nil
 }
+
+func (fakeRepository) ReserveForOrder(context.Context, string, string) error {
+	return nil
+}
+
+func (fakeRepository) ReleaseOrderReservation(context.Context, string, string) error {
+	return nil
+}

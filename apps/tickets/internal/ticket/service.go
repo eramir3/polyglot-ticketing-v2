@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"polyglot-ticketing-v2/apps/tickets/internal/errorcode"
 	commonv1 "polyglot-ticketing-v2/protogen/go/common/v1"
 )
@@ -69,6 +71,35 @@ func (service *Service) UpdateTicket(ctx context.Context, id string, input Updat
 	}
 	updated, err := service.coordinator.Update(ctx, id, input)
 	return updated, nil, err
+}
+
+// ReserveTicketForOrder is an internal Orders-to-Tickets operation. The
+// reservation is intentionally not routed through the ticket edit workflow:
+// it does not change any projected ticket fields or aggregate version.
+func (service *Service) ReserveTicketForOrder(ctx context.Context, ticketID string, orderID string) ([]ValidationError, error) {
+	if validationErrors := validateReservation(ticketID, orderID); len(validationErrors) > 0 {
+		return validationErrors, nil
+	}
+	return nil, service.repository.ReserveForOrder(ctx, ticketID, orderID)
+}
+
+// ReleaseTicketReservation clears only the matching order claim. This makes
+// cancellation and expiry activity retries harmless.
+func (service *Service) ReleaseTicketReservation(ctx context.Context, ticketID string, orderID string) ([]ValidationError, error) {
+	if validationErrors := validateReservation(ticketID, orderID); len(validationErrors) > 0 {
+		return validationErrors, nil
+	}
+	return nil, service.repository.ReleaseOrderReservation(ctx, ticketID, orderID)
+}
+
+func validateReservation(ticketID string, orderID string) []ValidationError {
+	if _, err := uuid.Parse(ticketID); err != nil {
+		return []ValidationError{{Code: errorcode.String(commonv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT), Field: "ticketId", Message: "Ticket ID must be a valid UUID."}}
+	}
+	if _, err := uuid.Parse(orderID); err != nil {
+		return []ValidationError{{Code: errorcode.String(commonv1.ErrorCode_ERROR_CODE_INVALID_ARGUMENT), Field: "orderId", Message: "Order ID must be a valid UUID."}}
+	}
+	return nil
 }
 
 func validateIdempotencyKey(key string, required bool) []ValidationError {

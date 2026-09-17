@@ -114,6 +114,8 @@ func (coordinator *Coordinator) Update(ctx context.Context, id string, input tic
 			switch applicationFailure.Type() {
 			case "TicketUpdateForbidden":
 				return ticket.Ticket{}, ticket.ErrForbidden
+			case "TicketUpdateReserved":
+				return ticket.Ticket{}, ticket.ErrReserved
 			case "TicketUpdateNotFound":
 				return ticket.Ticket{}, ticket.ErrNotFound
 			case "InvalidTicketUpdate", "InvalidProjection":

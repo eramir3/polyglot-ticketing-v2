@@ -204,10 +204,16 @@ services:
     environment:
       DATABASE_URL: postgresql://orders:${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD must be set}@orders-db:5432/orders-db?sslmode=disable
       GRPC_PORT: 50053
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      ORDERS_TEMPORAL_TASK_QUEUE: order-reservation
+      TICKETS_GRPC_URL: tickets:50052
     depends_on:
       orders-db:
         condition: service_healthy
       orders-migrate:
+        condition: service_completed_successfully
+      temporal-namespace:
         condition: service_completed_successfully
     expose:
       - '50053'

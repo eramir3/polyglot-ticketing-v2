@@ -74,7 +74,13 @@ func (server *Server) CancelOrder(
 	if errors.Is(err, order.ErrOrderNotCancelable) {
 		return nil, structuredError(codes.AlreadyExists, []order.ValidationError{{
 			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_ALREADY_EXISTS),
-			Message: "Completed orders cannot be canceled.",
+			Message: "Only created orders can be canceled.",
+		}})
+	}
+	if errors.Is(err, order.ErrUnavailable) {
+		return nil, structuredError(codes.Unavailable, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_SERVICE_UNAVAILABLE),
+			Message: "Unable to cancel order.",
 		}})
 	}
 	if err != nil {
@@ -115,6 +121,12 @@ func (server *Server) CreateOrder(
 		return nil, structuredError(codes.AlreadyExists, []order.ValidationError{{
 			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_ALREADY_EXISTS),
 			Message: "Ticket is currently reserved.",
+		}})
+	}
+	if errors.Is(err, order.ErrUnavailable) {
+		return nil, structuredError(codes.Unavailable, []order.ValidationError{{
+			Code:    errorcode.String(commonv1.ErrorCode_ERROR_CODE_SERVICE_UNAVAILABLE),
+			Message: "Unable to create order.",
 		}})
 	}
 	if err != nil {

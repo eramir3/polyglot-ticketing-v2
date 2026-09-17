@@ -82,3 +82,11 @@ func (persister *updatePersister) UpdateWithIdempotency(_ context.Context, _ str
 	persister.input = input
 	return persister.result, nil
 }
+
+func (persister *updatePersister) ReserveForOrder(context.Context, string, string) error {
+	return nil
+}
+
+func (persister *updatePersister) ReleaseOrderReservation(context.Context, string, string) error {
+	return nil
+}
