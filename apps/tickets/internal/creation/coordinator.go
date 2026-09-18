@@ -32,7 +32,7 @@ func operationKey(value []string) string {
 func (coordinator *Coordinator) Create(ctx context.Context, input ticket.CreateInput) (ticket.Ticket, error) {
 	// This deadline bounds only the request's wait. It does not cancel an
 	// accepted workflow or its activity retries.
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	workflowID := "create-ticket/" + uuid.NewString()
 	if input.IdempotencyKey != nil {
@@ -84,7 +84,7 @@ func (coordinator *Coordinator) Create(ctx context.Context, input ticket.CreateI
 func (coordinator *Coordinator) Update(ctx context.Context, id string, input ticket.UpdateInput) (ticket.Ticket, error) {
 	// This deadline bounds the caller's wait without canceling the accepted
 	// workflow update or the activity retries it may require.
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	workflowID := "ticket-updates/" + id
 	updateID := "update-ticket/" + operationKey([]string{id, input.UserID, input.IdempotencyKey})

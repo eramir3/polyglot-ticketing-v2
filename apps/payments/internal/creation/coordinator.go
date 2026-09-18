@@ -24,7 +24,7 @@ type Coordinator struct {
 }
 
 func (coordinator *Coordinator) CreatePayment(ctx context.Context, input payment.CreateInput) (payment.CreateResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	workflowID := createPaymentWorkflowID(input)

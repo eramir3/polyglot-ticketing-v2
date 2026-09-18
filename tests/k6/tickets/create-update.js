@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 import { createVerifiedPerformanceUser } from '../shared/auth.js';
 
 const baseUrl = __ENV.K6_BASE_URL || 'http://api-gateway:3000';
@@ -83,10 +84,11 @@ function createTicket(performanceUser, title) {
     title,
     userId: performanceUser.userId,
   };
+  const idempotencyKey = uuidv4();
   const response = http.post(
     `${baseUrl}/api/tickets`,
     JSON.stringify({ price: expectedTicket.price, title: expectedTicket.title }),
-    requestParameters(performanceUser),
+    requestParameters(performanceUser, idempotencyKey),
   );
   const succeeded = check(
     response,

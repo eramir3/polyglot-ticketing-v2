@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 import { createVerifiedPerformanceUser } from '../shared/auth.js';
 
 const baseUrl = __ENV.K6_BASE_URL || 'http://api-gateway:3000';
@@ -28,6 +29,7 @@ export function setup() {
 export default function (performanceUser) {
   const title = `Performance ticket ${runSuffix()}-${__VU}-${__ITER}`;
   const price = 10_000;
+  const idempotencyKey = uuidv4();
   const response = http.post(
     `${baseUrl}/api/tickets`,
     JSON.stringify({ price, title }),
@@ -35,6 +37,7 @@ export default function (performanceUser) {
       headers: {
         Cookie: performanceUser.sessionCookie,
         'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
       },
     },
   );

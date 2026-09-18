@@ -24,7 +24,7 @@ type Coordinator struct {
 }
 
 func (coordinator *Coordinator) ReserveTicket(ctx context.Context, input order.TicketReservationInput) (order.ReservationResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	input.OrderID = uuid.NewString()
 	run, err := coordinator.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
@@ -45,7 +45,7 @@ func (coordinator *Coordinator) ReserveTicket(ctx context.Context, input order.T
 }
 
 func (coordinator *Coordinator) CancelOrder(ctx context.Context, orderID string, userID string) (order.Order, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	run, err := coordinator.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:        "cancel-order/" + orderID,
@@ -68,7 +68,7 @@ func (coordinator *Coordinator) CancelOrder(ctx context.Context, orderID string,
 }
 
 func (coordinator *Coordinator) ResolvePaymentOutcome(ctx context.Context, orderID string, outcome order.PaymentOutcome) (order.Order, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	workflowID := "resolve-payment/" + orderID + "/" + string(outcome)
 	run, err := coordinator.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
