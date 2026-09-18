@@ -309,6 +309,35 @@ services:
     volumes:
       - payments-db-data:/var/lib/postgresql/data
 
+  k6:
+    image: grafana/k6:2.2.0
+    profiles: ['performance']
+    depends_on:
+      api-gateway:
+        condition: service_started
+    environment:
+      K6_BASE_URL: ${K6_BASE_URL:-http://api-gateway:3000}
+    volumes:
+      - ./tests/k6:/scripts:ro
+
+  tickets-performance-seed:
+    image: postgres:17-alpine
+    profiles: ['performance']
+    depends_on:
+      tickets-db:
+        condition: service_healthy
+      tickets-migrate:
+        condition: service_completed_successfully
+    environment:
+      PGDATABASE: tickets-db
+      PGHOST: tickets-db
+      PGPASSWORD: ${TICKETS_DB_PASSWORD:?TICKETS_DB_PASSWORD must be set}
+      PGUSER: tickets
+    command: ['psql', '-v', 'ON_ERROR_STOP=1', '-f', '/seed/tickets.sql']
+    volumes:
+      - ./tests/seed/tickets.sql:/seed/tickets.sql:ro
+
+
 volumes:
   temporal-data:
   identity-db-data:

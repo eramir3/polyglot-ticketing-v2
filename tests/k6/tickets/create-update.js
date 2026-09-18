@@ -1,21 +1,17 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { createVerifiedPerformanceUser } from '../shared/auth.js';
-import { metricSystemTags } from '../shared/metrics.js';
 
 const baseUrl = __ENV.K6_BASE_URL || 'http://api-gateway:3000';
 const mailpitUrl = __ENV.K6_MAILPIT_URL || 'http://mailpit:8025';
 const testConfigs = JSON.parse(open('./create-update-configs.json'));
 const profileName = readProfileName();
 const profile = testConfigs[profileName];
-const loadTestToken = __ENV.LOAD_TEST_METRICS_TOKEN;
-
 const initialPrice = 5;
 const firstUpdatePrice = 10;
 const finalUpdatePrice = 15;
 
 export const options = {
-  systemTags: metricSystemTags,
   scenarios: {
     [`tickets_create_update_${profileName}`]: profile.scenario,
   },
@@ -27,9 +23,7 @@ export const options = {
 export function setup() {
   return createVerifiedPerformanceUser({
     baseUrl,
-    loadTestToken,
     mailpitUrl,
-    setupEndpoint: 'tickets_create_update_auth_setup',
     userName: 'Ticket Create and Update Performance User',
     userPrefix: 'tickets-create-update',
   });
@@ -56,7 +50,7 @@ function runLifecycle(performanceUser) {
     title: `${baseTitle}-first-update`,
     userId: performanceUser.userId,
   };
-  if (!updateTicket(performanceUser, firstUpdate, 'tickets_create_update_first_update')) {
+  if (!updateTicket(performanceUser, firstUpdate)) {
     return;
   }
 
@@ -65,13 +59,13 @@ function runLifecycle(performanceUser) {
     price: finalUpdatePrice,
     title: `${baseTitle}-second-update`,
   };
-  if (!updateTicket(performanceUser, finalTicket, 'tickets_create_update_final_update')) {
+  if (!updateTicket(performanceUser, finalTicket)) {
     return;
   }
 
   const response = http.get(
     ticketUrl(finalTicket.id),
-    requestParameters(performanceUser, 'tickets_create_update_get'),
+    requestParameters(performanceUser),
   );
   check(
     response,
@@ -80,7 +74,6 @@ function runLifecycle(performanceUser) {
       'final retrieval returns the final ticket state': (result) =>
         hasTicket(result, finalTicket, 200),
     },
-    { endpoint: 'tickets_create_update_get' },
   );
 }
 
@@ -93,7 +86,7 @@ function createTicket(performanceUser, title) {
   const response = http.post(
     `${baseUrl}/api/tickets`,
     JSON.stringify({ price: expectedTicket.price, title: expectedTicket.title }),
-    requestParameters(performanceUser, 'tickets_create_update_create'),
+    requestParameters(performanceUser),
   );
   const succeeded = check(
     response,
@@ -102,7 +95,6 @@ function createTicket(performanceUser, title) {
       'creation returns the created ticket': (result) =>
         hasTicket(result, expectedTicket, 201),
     },
-    { endpoint: 'tickets_create_update_create' },
   );
   if (!succeeded) {
     return undefined;
@@ -111,11 +103,14 @@ function createTicket(performanceUser, title) {
   return response.json();
 }
 
-function updateTicket(performanceUser, expectedTicket, endpoint) {
+function updateTicket(performanceUser, expectedTicket) {
   const response = http.put(
     ticketUrl(expectedTicket.id),
     JSON.stringify({ price: expectedTicket.price, title: expectedTicket.title }),
-    requestParameters(performanceUser, endpoint),
+    requestParameters(
+      performanceUser,
+      `ticket-update-${runSuffix()}-${__VU}-${__ITER}`,
+    ),
   );
   return check(
     response,
@@ -124,7 +119,6 @@ function updateTicket(performanceUser, expectedTicket, endpoint) {
       'update returns the expected ticket': (result) =>
         hasTicket(result, expectedTicket, 200),
     },
-    { endpoint },
   );
 }
 
@@ -148,14 +142,15 @@ function hasTicket(response, expectedTicket, expectedStatus) {
   }
 }
 
-function requestParameters(performanceUser, endpoint) {
+function requestParameters(performanceUser, idempotencyKey) {
   return {
     headers: {
       Cookie: performanceUser.sessionCookie,
       'Content-Type': 'application/json',
-      'X-Ticketing-Load-Test-Token': loadTestToken,
+      ...(idempotencyKey === undefined
+        ? {}
+        : { 'Idempotency-Key': idempotencyKey }),
     },
-    tags: { endpoint, name: endpoint },
   };
 }
 

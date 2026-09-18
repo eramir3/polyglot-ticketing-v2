@@ -1,4 +1,4 @@
-.PHONY: docker-build docker-up docker-up-tools docker-down docker-reset docker-logs docker-ps
+.PHONY: docker-build docker-up docker-down docker-reset docker-logs docker-ps
 
 docker-build: generate-proto ## Build all Docker Compose service images.
 	docker compose build

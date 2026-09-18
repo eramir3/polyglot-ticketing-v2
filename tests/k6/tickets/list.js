@@ -1,6 +1,5 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { metricSystemTags } from '../shared/metrics.js';
 
 const baseUrl = __ENV.K6_BASE_URL || 'http://api-gateway:3000';
 const testConfigs = JSON.parse(open('./list-configs.json'));
@@ -9,7 +8,6 @@ const profile = testConfigs[profileName];
 const expectedTicketCount = readExpectedTicketCount();
 
 export const options = {
-  systemTags: metricSystemTags,
   scenarios: {
     [`tickets_list_${profileName}`]: profile.scenario,
   },
@@ -56,12 +54,7 @@ function readProfileName() {
 }
 
 export default function () {
-  const response = http.get(`${baseUrl}/api/tickets`, {
-    headers: {
-      'X-Ticketing-Load-Test-Token': __ENV.LOAD_TEST_METRICS_TOKEN,
-    },
-    tags: { endpoint: 'tickets_list', name: 'tickets_list' },
-  });
+  const response = http.get(`${baseUrl}/api/tickets`);
 
   check(response, {
     'returns HTTP 200': (result) => result.status === 200,

@@ -2,6 +2,7 @@
 
 include make/development.mk
 include make/docker.mk
+include make/performance.mk
 
 .PHONY: help
 help: ## Show available commands.

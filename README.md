@@ -1,5 +1,26 @@
 # New Nx Repository
 
+## Local performance tests
+
+The ticket k6 tests run in Docker on the local Compose network. Preparation
+targets are destructive: they run `make docker-reset` and therefore delete
+local Compose volumes.
+
+```sh
+make prepare-k6-tickets-list
+make k6-tickets-list K6_PROFILE=smoke
+
+make prepare-k6-tickets-create
+make k6-tickets-create K6_PROFILE=smoke
+
+make prepare-k6-tickets-create-update
+make k6-tickets-create-update K6_PROFILE=smoke
+```
+
+Use `K6_PROFILE=load` or `K6_PROFILE=stress` for the longer profiles. The
+list preparation target seeds exactly 100 tickets; override
+`K6_EXPECT_TICKET_COUNT` only when running against compatible data.
+
 <a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
 
 ✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.

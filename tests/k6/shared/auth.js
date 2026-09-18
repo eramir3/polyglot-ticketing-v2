@@ -5,9 +5,7 @@ const password = 'performance-ticket-password';
 
 export function createVerifiedPerformanceUser({
   baseUrl,
-  loadTestToken,
   mailpitUrl,
-  setupEndpoint,
   userName,
   userPrefix,
 }) {
@@ -17,23 +15,21 @@ export function createVerifiedPerformanceUser({
     http.post(
       `${baseUrl}/api/auth/signup`,
       JSON.stringify({ email, name: userName, password }),
-      requestParameters(loadTestToken, setupEndpoint),
+      requestParameters(),
     ),
     201,
     'sign up the performance user',
   );
 
   const verificationEmail = waitForVerificationEmail({
-    loadTestToken,
     mailpitUrl,
     recipient: email,
-    setupEndpoint,
   });
   const verificationToken = verificationTokenFrom(verificationEmail);
   assertSuccessfulResponse(
     http.get(
       `${baseUrl}/api/auth/verify-email?token=${encodeURIComponent(verificationToken)}`,
-      requestParameters(loadTestToken, setupEndpoint),
+      requestParameters(),
     ),
     200,
     'verify the performance user email',
@@ -42,7 +38,7 @@ export function createVerifiedPerformanceUser({
   const signInResponse = http.post(
     `${baseUrl}/api/auth/signin`,
     JSON.stringify({ email, password }),
-    requestParameters(loadTestToken, setupEndpoint),
+    requestParameters(),
   );
   assertSuccessfulResponse(signInResponse, 201, 'sign in the performance user');
 
@@ -68,13 +64,11 @@ function assertSuccessfulResponse(response, expectedStatus, action) {
   }
 }
 
-function requestParameters(loadTestToken, endpoint) {
+function requestParameters() {
   return {
     headers: {
       'Content-Type': 'application/json',
-      'X-Ticketing-Load-Test-Token': loadTestToken,
     },
-    tags: { endpoint, name: endpoint },
   };
 }
 
@@ -110,16 +104,14 @@ function verificationTokenFrom(emailText) {
 }
 
 function waitForVerificationEmail({
-  loadTestToken,
   mailpitUrl,
   recipient,
-  setupEndpoint,
 }) {
   const timeoutAt = Date.now() + 10_000;
   while (Date.now() < timeoutAt) {
     const messagesResponse = http.get(
       `${mailpitUrl}/api/v1/messages`,
-      requestParameters(loadTestToken, setupEndpoint),
+      requestParameters(),
     );
     assertSuccessfulResponse(
       messagesResponse,
@@ -134,7 +126,7 @@ function waitForVerificationEmail({
     if (message) {
       const detailResponse = http.get(
         `${mailpitUrl}/api/v1/message/${message.ID}`,
-        requestParameters(loadTestToken, setupEndpoint),
+        requestParameters(),
       );
       assertSuccessfulResponse(
         detailResponse,
