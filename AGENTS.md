@@ -34,6 +34,11 @@
   (or `make generate-proto`); do not hand-edit `protogen/go` or `protogen/ts`.
 - Each service owns its PostgreSQL database and migrations. Do not query or
   write another service's database directly.
+- The target-state policy for service-to-service traffic is in
+  `docs/zero-trust.md`. Local Compose plaintext gRPC is a development-only
+  exception; Kubernetes production requires workload mTLS, per-RPC
+  authorization, and default-deny network policies. Do not add a new internal
+  RPC or caller relationship without updating its authorization matrix.
 - Ticket creation and updates are Temporal workflows. Orders also uses Temporal
   for its ticket-reservation lifecycle. Tickets uses aggregate versions to
   order writes to the Orders ticket projection through Orders gRPC.

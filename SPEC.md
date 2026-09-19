@@ -34,6 +34,14 @@ Orders exposes the internal `EnsureTicketProjection` RPC, used only by Tickets
 Temporal activities. Tickets exposes internal reservation RPCs used only by
 Orders Temporal activities.
 
+## Zero-trust service traffic
+
+[`docs/zero-trust.md`](docs/zero-trust.md) defines the target-state policy for
+internal gRPC traffic. Kubernetes production deployment requires mutually
+authenticated workload identity, per-RPC least-privilege authorization, and
+default-deny network policy enforcement. Local Docker Compose plaintext gRPC is
+an isolated development exception and is not zero-trust compliant.
+
 ## Ticket creation workflow
 
 `POST /api/tickets` validates the request and forwards the authenticated user
@@ -65,7 +73,7 @@ normal local container restarts.
 - Requests without a key are independent creations.
 - The local Temporal namespace retains completed workflow history for seven
   days. Use a new key for a new intended ticket creation.
-- A request waits up to 30 seconds; `503` means the durable operation may still
+- A request waits up to 60 seconds; `503` means the durable operation may still
   be running and should be retried with the same key.
 
 This design intentionally does not use events or an outbox pattern. Ticket
